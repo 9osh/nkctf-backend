@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nkctf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nkctf
+      POSTGRES_USER: nkctf
+      POSTGRES_PASSWORD: nkctf123456
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    networks:
+      - nkctf-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nkctf -d nkctf"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: nkctf-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass nkctf123456
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - nkctf-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "nkctf123456", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  nkctf-network:
+    driver: bridge

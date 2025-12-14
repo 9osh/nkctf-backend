@@ -1,0 +1,101 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: nkctf-platform
+
+  # 数据库配置
+  datasource:
+    url: jdbc:postgresql://localhost:5432/nkctf
+    username: nkctf
+    password: nkctf123456
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      idle-timeout: 30000
+      pool-name: NkctfHikariCP
+      max-lifetime: 1800000
+      connection-timeout: 30000
+
+  # Redis 配置
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: nkctf123456
+      database: 0
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 5
+          max-wait: -1ms
+
+  # Session 配置 (7天过期)
+  session:
+    store-type: redis
+    timeout: 7d
+    redis:
+      namespace: nkctf:session
+
+  # 虚拟线程配置 (Java 21)
+  threads:
+    virtual:
+      enabled: true
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  mapper-locations: classpath:/mapper/**/*.xml
+  type-aliases-package: cn.edu.ndky.nkctf.entity
+  type-handlers-package: cn.edu.ndky.nkctf.config
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# JWT 配置
+jwt:
+  secret: nkctf-secret-key-please-change-in-production-environment-2024
+  expiration: 604800000  # 7天 (毫秒)
+  header: Authorization
+  prefix: Bearer
+
+# Docker 配置
+docker:
+  host: unix:///var/run/docker.sock
+  registry:
+    url: ""
+    username: ""
+    password: ""
+  container:
+    network: nkctf-challenge-network
+    memory-limit: 256m
+    cpu-limit: 0.5
+    timeout: 3600  # 容器最大存活时间(秒)
+
+# SpringDoc OpenAPI 配置
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+# 日志配置
+logging:
+  level:
+    root: INFO
+    cn.edu.ndky.nkctf: DEBUG
+    org.springframework.security: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
