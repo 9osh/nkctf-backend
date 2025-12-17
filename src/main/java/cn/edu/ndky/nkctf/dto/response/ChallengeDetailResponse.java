@@ -60,6 +60,11 @@ public class ChallengeDetailResponse {
   private List<AttachmentResponse> attachments;
 
   /**
+   * 是否支持 Docker 容器 (用于前端渲染启动容器按钮)
+   */
+  private Boolean hasDocker;
+
+  /**
    * 提示响应
    */
   @Data

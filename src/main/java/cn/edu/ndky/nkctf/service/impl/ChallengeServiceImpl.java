@@ -272,6 +272,7 @@ public class ChallengeServiceImpl implements ChallengeService {
         .content(challenge.getContent())
         .hints(hints)
         .attachments(attachments.isEmpty() ? null : attachments)
+        .hasDocker(challenge.getDockerImage() != null && !challenge.getDockerImage().isBlank())
         .build();
   }
 

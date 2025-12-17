@@ -53,6 +53,11 @@ public class CompetitionChallengeDetailResponse {
    */
   private List<AttachmentResponse> attachments;
 
+  /**
+   * 是否支持 Docker 容器 (用于前端渲染启动容器按钮)
+   */
+  private Boolean hasDocker;
+
   @Data
   @Builder
   public static class HintResponse {

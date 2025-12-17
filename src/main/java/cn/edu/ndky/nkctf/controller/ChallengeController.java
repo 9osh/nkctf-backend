@@ -69,14 +69,14 @@ public class ChallengeController {
   }
 
   @Operation(summary = "提交 Flag", description = "提交 Flag 进行验证，正确则获得积分")
-  @RateLimit(window = 60, maxRequests = 10, message = "提交过于频繁，请稍后再试")
+  @RateLimit(window = 60, maxRequests = 3, message = "提交过于频繁，请稍后再试")
   @PostMapping("/submit")
   public Result<SubmitFlagResponse> submitFlag(@Valid @RequestBody SubmitFlagRequest request) {
     return Result.success(submissionService.submitFlag(request));
   }
 
   @Operation(summary = "解锁提示", description = "花费积分解锁题目提示")
-  @RateLimit(window = 60, maxRequests = 20, message = "请求过于频繁，请稍后再试")
+  @RateLimit(window = 60, maxRequests = 3, message = "请求过于频繁，请稍后再试")
   @PostMapping("/hints/unlock")
   public Result<UnlockHintResponse> unlockHint(@Valid @RequestBody UnlockHintRequest request) {
     return Result.success(hintService.unlockHint(request));

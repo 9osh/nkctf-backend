@@ -20,6 +20,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -79,6 +80,8 @@ public class CompetitionServiceImpl implements CompetitionService {
   private final StringRedisTemplate stringRedisTemplate;
 
   private static final String DYNAMIC_FLAG_KEY_PREFIX = "nkctf:flag:";
+  private static final String CONTAINER_CHALLENGE_USER_PREFIX = "nkctf:container:challenge:";
+  private static final String LOCK_PREFIX = "nkctf:lock:cflag:";
   private static final DateTimeFormatter DATE_FORMATTER =
       DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -220,6 +223,7 @@ public class CompetitionServiceImpl implements CompetitionService {
         .content(challenge.getContent())
         .hints(hintResponses)
         .attachments(attachments)
+        .hasDocker(challenge.getDockerImage() != null && !challenge.getDockerImage().isBlank())
         .build();
   }
 
@@ -697,96 +701,131 @@ public class CompetitionServiceImpl implements CompetitionService {
       throw new BusinessException(404, "题目不存在");
     }
 
-    // ========== 检查是否已解决 ==========
-    boolean alreadySolved;
+    // ========== 分布式锁：防止并发重复计分 ==========
+    // 团队赛：按队伍+题目加锁，防止队员同时提交
+    // 个人赛：按用户+题目加锁，防止重复提交
+    String lockKey;
     if (Boolean.TRUE.equals(competition.getIsTeamCompetition())) {
-      alreadySolved = Boolean.TRUE.equals(submissionMapper.hasTeamSolvedInCompetition(
-          competition.getId(), currentUser.getTeamId(), challenge.getId()));
+      lockKey = LOCK_PREFIX + competition.getId() + ":" + currentUser.getTeamId()
+          + ":" + challenge.getId();
     } else {
-      alreadySolved = Boolean.TRUE.equals(submissionMapper.hasUserSolvedInCompetition(
-          competition.getId(), currentUser.getId(), challenge.getId()));
+      lockKey = LOCK_PREFIX + competition.getId() + ":" + currentUser.getId()
+          + ":" + challenge.getId();
+    }
+    if (!tryLock(lockKey, 10)) {
+      throw new BusinessException(429, "操作过于频繁，请稍后再试");
     }
 
-    if (alreadySolved) {
-      Integer score = getParticipantScore(competition, currentUser);
-      Integer rank = getParticipantRank(competition, currentUser);
-      return CompetitionSubmitFlagResponse.builder()
-          .correct(false)
-          .message("该题目已被解决")
-          .totalScore(score)
-          .rank(rank)
-          .scored(false)
-          .build();
-    }
-
-    // ========== 验证 Flag ==========
-    String submittedFlag = request.getFlag().trim();
-    String correctFlag = getCorrectFlag(challenge, currentUser.getId());
-    boolean isCorrect = correctFlag != null && correctFlag.equals(submittedFlag);
-
-    // 判断是否计分（只有 active 状态才计分）
-    boolean shouldScore = Competition.Status.ACTIVE.getValue().equals(competition.getStatus());
-
-    // ========== 创建提交记录 ==========
-    Submission submission = new Submission();
-    submission.setUserId(currentUser.getId());  // 从 JWT 获取
-    submission.setChallengeId(challenge.getId());
-    submission.setCompetitionId(competition.getId());
-    submission.setFlag(submittedFlag);
-    submission.setIsCorrect(isCorrect);
-
-    if (Boolean.TRUE.equals(competition.getIsTeamCompetition())) {
-      submission.setTeamId(currentUser.getTeamId());  // 从数据库获取
-    }
-
-    if (isCorrect && shouldScore) {
-      submission.setPointsAwarded(challenge.getPoints());
-
-      // 更新参赛者分数
+    try {
+      // ========== 检查是否已解决 ==========
+      boolean alreadySolved;
       if (Boolean.TRUE.equals(competition.getIsTeamCompetition())) {
-        competitionTeamMapper.addTeamScore(
-            competition.getId(), currentUser.getTeamId(), challenge.getPoints());
-        log.info("竞赛 {} 中队伍 {} 解决了题目 {}，获得 {} 分",
-            competition.getName(), currentUser.getTeamId(),
-            challenge.getTitle(), challenge.getPoints());
+        alreadySolved = Boolean.TRUE.equals(submissionMapper.hasTeamSolvedInCompetition(
+            competition.getId(), currentUser.getTeamId(), challenge.getId()));
       } else {
-        competitionUserMapper.addUserScore(
-            competition.getId(), currentUser.getId(), challenge.getPoints());
-        log.info("竞赛 {} 中用户 {} 解决了题目 {}，获得 {} 分",
-            competition.getName(), currentUser.getUsername(),
-            challenge.getTitle(), challenge.getPoints());
+        alreadySolved = Boolean.TRUE.equals(submissionMapper.hasUserSolvedInCompetition(
+            competition.getId(), currentUser.getId(), challenge.getId()));
       }
-    } else {
-      submission.setPointsAwarded(0);
-    }
 
-    submissionMapper.insert(submission);
+      if (alreadySolved) {
+        Integer score = getParticipantScore(competition, currentUser);
+        Integer rank = getParticipantRank(competition, currentUser);
+        return CompetitionSubmitFlagResponse.builder()
+            .correct(false)
+            .message("该题目已被解决")
+            .totalScore(score)
+            .rank(rank)
+            .scored(false)
+            .build();
+      }
 
-    // ========== 构建响应 ==========
-    Integer totalScore = getParticipantScore(competition, currentUser);
-    Integer rank = getParticipantRank(competition, currentUser);
+      // 动态题目需要检查容器是否活跃
+      if (Boolean.TRUE.equals(challenge.getIsDynamic())) {
+        String challengeUserKey = CONTAINER_CHALLENGE_USER_PREFIX
+            + challenge.getId() + ":user:" + currentUser.getId();
+        String containerId = stringRedisTemplate.opsForValue().get(challengeUserKey);
+        if (containerId == null) {
+          return CompetitionSubmitFlagResponse.builder()
+              .correct(false)
+              .message("容器不存在或已过期，请重新启动容器后再提交")
+              .totalScore(getParticipantScore(competition, currentUser))
+              .rank(getParticipantRank(competition, currentUser))
+              .scored(false)
+              .build();
+        }
+      }
 
-    if (isCorrect) {
-      String message = shouldScore
-          ? "恭喜你，Flag 正确！"
-          : "Flag 正确，但竞赛已结束，不计分。";
+      // ========== 验证 Flag ==========
+      String submittedFlag = request.getFlag().trim();
+      String correctFlag = getCorrectFlag(challenge, currentUser.getId());
+      boolean isCorrect = correctFlag != null && correctFlag.equals(submittedFlag);
 
-      return CompetitionSubmitFlagResponse.builder()
-          .correct(true)
-          .pointsAwarded(shouldScore ? challenge.getPoints() : 0)
-          .message(message)
-          .totalScore(totalScore)
-          .rank(rank)
-          .scored(shouldScore)
-          .build();
-    } else {
-      return CompetitionSubmitFlagResponse.builder()
-          .correct(false)
-          .message("Flag 错误，请再试一次")
-          .totalScore(totalScore)
-          .rank(rank)
-          .scored(false)
-          .build();
+      // 判断是否计分（只有 active 状态才计分）
+      boolean shouldScore = Competition.Status.ACTIVE.getValue().equals(competition.getStatus());
+
+      // ========== 创建提交记录 ==========
+      Submission submission = new Submission();
+      submission.setUserId(currentUser.getId());  // 从 JWT 获取
+      submission.setChallengeId(challenge.getId());
+      submission.setCompetitionId(competition.getId());
+      submission.setFlag(submittedFlag);
+      submission.setIsCorrect(isCorrect);
+
+      if (Boolean.TRUE.equals(competition.getIsTeamCompetition())) {
+        submission.setTeamId(currentUser.getTeamId());  // 从数据库获取
+      }
+
+      if (isCorrect && shouldScore) {
+        submission.setPointsAwarded(challenge.getPoints());
+
+        // 更新参赛者分数
+        if (Boolean.TRUE.equals(competition.getIsTeamCompetition())) {
+          competitionTeamMapper.addTeamScore(
+              competition.getId(), currentUser.getTeamId(), challenge.getPoints());
+          log.info("竞赛 {} 中队伍 {} 解决了题目 {}，获得 {} 分",
+              competition.getName(), currentUser.getTeamId(),
+              challenge.getTitle(), challenge.getPoints());
+        } else {
+          competitionUserMapper.addUserScore(
+              competition.getId(), currentUser.getId(), challenge.getPoints());
+          log.info("竞赛 {} 中用户 {} 解决了题目 {}，获得 {} 分",
+              competition.getName(), currentUser.getUsername(),
+              challenge.getTitle(), challenge.getPoints());
+        }
+      } else {
+        submission.setPointsAwarded(0);
+      }
+
+      submissionMapper.insert(submission);
+
+      // ========== 构建响应 ==========
+      Integer totalScore = getParticipantScore(competition, currentUser);
+      Integer rank = getParticipantRank(competition, currentUser);
+
+      if (isCorrect) {
+        String message = shouldScore
+            ? "恭喜你，Flag 正确！"
+            : "Flag 正确，但竞赛已结束，不计分。";
+
+        return CompetitionSubmitFlagResponse.builder()
+            .correct(true)
+            .pointsAwarded(shouldScore ? challenge.getPoints() : 0)
+            .message(message)
+            .totalScore(totalScore)
+            .rank(rank)
+            .scored(shouldScore)
+            .build();
+      } else {
+        return CompetitionSubmitFlagResponse.builder()
+            .correct(false)
+            .message("Flag 错误，请再试一次")
+            .totalScore(totalScore)
+            .rank(rank)
+            .scored(false)
+            .build();
+      }
+    } finally {
+      unlock(lockKey);
     }
   }
 
@@ -826,5 +865,21 @@ public class CompetitionServiceImpl implements CompetitionService {
     } else {
       return challenge.getFlag();
     }
+  }
+
+  /**
+   * 尝试获取分布式锁
+   */
+  private boolean tryLock(String key, long timeoutSeconds) {
+    Boolean success = stringRedisTemplate.opsForValue()
+        .setIfAbsent(key, "1", Duration.ofSeconds(timeoutSeconds));
+    return Boolean.TRUE.equals(success);
+  }
+
+  /**
+   * 释放分布式锁
+   */
+  private void unlock(String key) {
+    stringRedisTemplate.delete(key);
   }
 }

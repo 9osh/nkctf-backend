@@ -20,6 +20,8 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+
 /**
  * 提交服务实现
  *
@@ -51,6 +53,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class SubmissionServiceImpl implements SubmissionService {
 
   private static final String DYNAMIC_FLAG_KEY_PREFIX = "nkctf:flag:";
+  private static final String CONTAINER_CHALLENGE_USER_PREFIX = "nkctf:container:challenge:";
+  private static final String LOCK_PREFIX = "nkctf:lock:flag:";
 
   private final SubmissionMapper submissionMapper;
   private final ChallengeMapper challengeMapper;
@@ -79,64 +83,89 @@ public class SubmissionServiceImpl implements SubmissionService {
       throw new BusinessException(403, "该题目不可通过此接口提交，请检查是否为竞赛题目");
     }
 
-    // ========== 业务逻辑 ==========
-
-    // 检查是否已经解决（防止重复计分）
-    Boolean alreadySolved = submissionMapper.hasUserSolved(
-        currentUser.getId(), challenge.getId());
-    if (Boolean.TRUE.equals(alreadySolved)) {
-      return SubmitFlagResponse.builder()
-          .correct(false)
-          .message("你已经解决了这道题目")
-          .totalScore(currentUser.getScore())
-          .rank(userMapper.getUserRank(currentUser.getId()))
-          .build();
+    // ========== 分布式锁：防止并发重复计分 ==========
+    String lockKey = LOCK_PREFIX + currentUser.getId() + ":" + challenge.getId();
+    if (!tryLock(lockKey, 10)) {
+      throw new BusinessException(429, "操作过于频繁，请稍后再试");
     }
 
-    // 验证 Flag（使用服务端存储的正确答案）
-    String submittedFlag = request.getFlag().trim();
-    String correctFlag = getCorrectFlag(challenge, currentUser.getId());
-    boolean isCorrect = correctFlag != null && correctFlag.equals(submittedFlag);
+    try {
+      // ========== 业务逻辑 ==========
 
-    // 创建提交记录（使用服务端获取的用户 ID）
-    Submission submission = new Submission();
-    submission.setUserId(currentUser.getId());  // 从 JWT 获取，非请求参数
-    submission.setChallengeId(challenge.getId());
-    submission.setFlag(submittedFlag);
-    submission.setIsCorrect(isCorrect);
-    submission.setPointsAwarded(isCorrect ? challenge.getPoints() : 0);
-    submissionMapper.insert(submission);
+      // 检查是否已经解决（防止重复计分）
+      Boolean alreadySolved = submissionMapper.hasUserSolved(
+          currentUser.getId(), challenge.getId());
+      if (Boolean.TRUE.equals(alreadySolved)) {
+        return SubmitFlagResponse.builder()
+            .correct(false)
+            .message("你已经解决了这道题目")
+            .totalScore(currentUser.getScore())
+            .rank(userMapper.getUserRank(currentUser.getId()))
+            .build();
+      }
 
-    if (isCorrect) {
-      // 更新用户分数（服务端计算）
-      int newScore = (currentUser.getScore() != null ? currentUser.getScore() : 0)
-          + challenge.getPoints();
-      currentUser.setScore(newScore);
-      userMapper.updateById(currentUser);
+      // 动态题目需要检查容器是否活跃
+      if (Boolean.TRUE.equals(challenge.getIsDynamic())) {
+        String challengeUserKey = CONTAINER_CHALLENGE_USER_PREFIX
+            + challenge.getId() + ":user:" + currentUser.getId();
+        String containerId = stringRedisTemplate.opsForValue().get(challengeUserKey);
+        if (containerId == null) {
+          return SubmitFlagResponse.builder()
+              .correct(false)
+              .message("容器不存在或已过期，请重新启动容器后再提交")
+              .totalScore(currentUser.getScore())
+              .rank(userMapper.getUserRank(currentUser.getId()))
+              .build();
+        }
+      }
 
-      // 更新排行榜冗余字段
-      userMapper.updateLeaderboardFields(currentUser.getId());
+      // 验证 Flag（使用服务端存储的正确答案）
+      String submittedFlag = request.getFlag().trim();
+      String correctFlag = getCorrectFlag(challenge, currentUser.getId());
+      boolean isCorrect = correctFlag != null && correctFlag.equals(submittedFlag);
 
-      log.info("用户 {} 成功解决题目 {}，获得 {} 分",
-          currentUser.getUsername(), challenge.getTitle(), challenge.getPoints());
+      // 创建提交记录（使用服务端获取的用户 ID）
+      Submission submission = new Submission();
+      submission.setUserId(currentUser.getId());  // 从 JWT 获取，非请求参数
+      submission.setChallengeId(challenge.getId());
+      submission.setFlag(submittedFlag);
+      submission.setIsCorrect(isCorrect);
+      submission.setPointsAwarded(isCorrect ? challenge.getPoints() : 0);
+      submissionMapper.insert(submission);
 
-      return SubmitFlagResponse.builder()
-          .correct(true)
-          .pointsAwarded(challenge.getPoints())
-          .message("恭喜你，Flag 正确！")
-          .totalScore(currentUser.getScore())
-          .rank(userMapper.getUserRank(currentUser.getId()))
-          .build();
-    } else {
-      log.debug("用户 {} 提交了错误的 Flag，题目: {}",
-          currentUser.getUsername(), challenge.getTitle());
+      if (isCorrect) {
+        // 更新用户分数（服务端计算）
+        int newScore = (currentUser.getScore() != null ? currentUser.getScore() : 0)
+            + challenge.getPoints();
+        currentUser.setScore(newScore);
+        userMapper.updateById(currentUser);
 
-      return SubmitFlagResponse.builder()
-          .correct(false)
-          .message("Flag 错误，请再试一次")
-          .totalScore(currentUser.getScore())
-          .rank(userMapper.getUserRank(currentUser.getId()))
-          .build();
+        // 更新排行榜冗余字段
+        userMapper.updateLeaderboardFields(currentUser.getId());
+
+        log.info("用户 {} 成功解决题目 {}，获得 {} 分",
+            currentUser.getUsername(), challenge.getTitle(), challenge.getPoints());
+
+        return SubmitFlagResponse.builder()
+            .correct(true)
+            .pointsAwarded(challenge.getPoints())
+            .message("恭喜你，Flag 正确！")
+            .totalScore(currentUser.getScore())
+            .rank(userMapper.getUserRank(currentUser.getId()))
+            .build();
+      } else {
+        log.debug("用户 {} 提交了错误的 Flag，题目: {}",
+            currentUser.getUsername(), challenge.getTitle());
+
+        return SubmitFlagResponse.builder()
+            .correct(false)
+            .message("Flag 错误，请再试一次")
+            .totalScore(currentUser.getScore())
+            .rank(userMapper.getUserRank(currentUser.getId()))
+            .build();
+      }
+    } finally {
+      unlock(lockKey);
     }
   }
 
@@ -195,5 +224,21 @@ public class SubmissionServiceImpl implements SubmissionService {
     }
 
     return user;
+  }
+
+  /**
+   * 尝试获取分布式锁
+   */
+  private boolean tryLock(String key, long timeoutSeconds) {
+    Boolean success = stringRedisTemplate.opsForValue()
+        .setIfAbsent(key, "1", Duration.ofSeconds(timeoutSeconds));
+    return Boolean.TRUE.equals(success);
+  }
+
+  /**
+   * 释放分布式锁
+   */
+  private void unlock(String key) {
+    stringRedisTemplate.delete(key);
   }
 }

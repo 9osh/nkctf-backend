@@ -303,7 +303,161 @@ VALUES
     TRUE,
     '/api/attachments/download?path=crypto/xor_challenge.txt',
     'xor_challenge.txt'
+),
+(
+    'Simple Check',
+    'Check~So simple~',
+    E'Find the simple flag in this challenge.\n\nFlag format: flag{...}',
+    'REVERSE',
+    'EASY',
+    100,
+    'admin',
+    'flag{MAth_i&_GOOd_DON7_90V_7hInK?}',
+    FALSE,
+    TRUE,
+    '/api/attachments/download?path=re/simplecheck.apk',
+    'simplcheck.apk'
+),
+(
+    'DDCTF-Easy-apk',
+    'DDCTF-Easy-apk',
+    E'This is a simple reverse engineering challenge.\n\nFlag format: nkctf{...}',
+    'REVERSE',
+    'EASY',
+    100,
+    'admin',
+    'nkctf{DDCTF-3ad60811d87c4a2dba0ef651b2d93476@didichuxing.com}',
+    FALSE,
+    TRUE,
+    '/api/attachments/download?path=re/DDCTF-Easy.apk.64812266499cc050ac23e190e53b87f7.zip',
+    'DDCTF-Easy.apk.64812266499cc050ac23e190e53b87f7.zip'
+),
+(
+    'Smali:Crackme',
+    'easy smali',
+    E'This is a simple smali reverse engineering challenge.\n\nFlag format: PCTF{...}',
+    'REVERSE',
+    'EASY',
+    100,
+    'admin',
+    'PCTF{Sm4liRiver}',
+    FALSE,
+    TRUE,
+    '/api/attachments/download?path=re/Crackme.smali',
+    'Crackme.smali'
+),
+(
+    'CCF 100',
+    '爬楼梯',
+    E'爬得够高才能看到更远的风景。flag 格式: nkctf{...}',
+    'REVERSE',
+    'EASY',
+    100,
+    'admin',
+    'nkctf{268796A5E68A25A1}',
+    FALSE,
+    TRUE,
+    '/api/attachments/download?path=re/CFF_100.apk',
+    'CFF_100.apk'
+),
+(
+    'MD5',
+    'MD5',
+    E'Flag format: nkctf{...}',
+    'CRYPTO',
+    'EASY',
+    10,
+    'admin',
+    'nkctf{admin1}',
+    FALSE,
+    TRUE,
+    '/api/attachments/download?path=crypto/27120bd8-e273-4528-97a9-28dcebe236de.zip',
+    '27120bd8-e273-4528-97a9-28dcebe236de.zip'
+),
+(
+    'URL Encode',
+    'url encode',
+    E'Flag format: flag{...}',
+    'CRYPTO',
+    'EASY',
+    10,
+    'admin',
+    'flag{and 1=1}',
+    FALSE,
+    TRUE,
+    '/api/attachments/download?path=crypto/8c1b8065-c3ae-46d7-afc7-1be8d95aac47.zip',
+    '8c1b8065-c3ae-46d7-afc7-1be8d95aac47.zip'
+),
+(
+    '看我回旋踢',
+    '终于给你头踢正了...',
+    E'Flag format: flag{...}',
+    'CRYPTO',
+    'EASY',
+    10,
+    'admin',
+    'flag{5cd1004d-86a5-46d8-b720-beb5ba0417e1}',
+    FALSE,
+    TRUE,
+    '/api/attachments/download?path=crypto/1784aa2b-cfcb-428e-949c-d6e4728fb94f.zip',
+    '1784aa2b-cfcb-428e-949c-d6e4728fb94f.zip'
+),
+(
+    'morse',
+    'morse',
+    E'Flag format: flag{...}',
+    'CRYPTO',
+    'EASY',
+    10,
+    'admin',
+    'flag{ILOVEYOU}',
+    FALSE,
+    TRUE,
+    '/api/attachments/download?path=crypto/1bb81ad9-8df8-49f1-bdae-0226869b16c8.zip',
+    '1bb81ad9-8df8-49f1-bdae-0226869b16c8.zip'
 )
+ON CONFLICT DO NOTHING;
+
+-- 插入动态容器题目 (Web)
+INSERT INTO challenge (title, description, content, category, difficulty, points, author, flag, is_dynamic, docker_image, enabled)
+VALUES
+(
+    'ThinkPHP RCE',
+    'ThinkPHP 5.0.20 远程代码执行漏洞',
+    E'## 题目描述\n\n这是一个运行 ThinkPHP 5.0.20 的 Web 应用。\n\n众所周知，ThinkPHP 5.x 版本存在远程代码执行漏洞（CVE-2018-20062），你能利用这个漏洞获取 Flag 吗？\n\n## 提示\n\n- Flag 存储在环境变量中\n- 漏洞与路由解析相关\n- 查阅 ThinkPHP 5.0.x RCE 漏洞分析文章\n\n## Flag 格式\n\n`nkctf{...}`（动态 Flag，每个用户不同）',
+    'WEB',
+    'MEDIUM',
+    200,
+    'admin',
+    NULL,  -- 动态 Flag，由容器服务生成
+    TRUE,  -- 标记为动态题目
+    'vulhub/thinkphp:5.0.20',  -- Docker 镜像
+    TRUE
+),
+(
+    'PHP 文件包含',
+    '经典的 LFI 漏洞利用',
+    E'## 题目描述\n\n这是一个存在本地文件包含（LFI）漏洞的 PHP 应用。\n\n你能通过文件包含漏洞读取服务器上的敏感信息吗？\n\n## 目标\n\n读取 Flag（存储在环境变量中）\n\n## Flag 格式\n\n`nkctf{...}`（动态 Flag）',
+    'WEB',
+    'EASY',
+    150,
+    'admin',
+    NULL,
+    TRUE,
+    'vulhub/php:5.4.45-apache-lfi',
+    TRUE
+)
+ON CONFLICT DO NOTHING;
+
+-- 插入动态容器题目的提示
+INSERT INTO hint (challenge_id, content, cost, sort_order)
+SELECT c.id, '尝试访问 /index.php?s=/index/\\think\\app/invokefunction&function=call_user_func_array', 50, 1
+FROM challenge c WHERE c.title = 'ThinkPHP RCE'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO hint (challenge_id, content, cost, sort_order)
+SELECT c.id, '使用 phpinfo() 查看环境变量中的 FLAG', 50, 2
+FROM challenge c WHERE c.title = 'ThinkPHP RCE'
 ON CONFLICT DO NOTHING;
 
 -- 插入题目提示

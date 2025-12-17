@@ -81,6 +81,11 @@ docker:
     memory-limit: 256m
     cpu-limit: 0.5
     timeout: 3600  # 容器最大存活时间(秒)
+    host: localhost  # 返回给用户的访问地址
+  limits:
+    user-max-containers: 1    # 普通用户最大容器数
+    team-max-containers: 3    # 团队最大容器数
+    max-extend-count: 3       # 每个容器最大延时次数
 
 # SpringDoc OpenAPI 配置
 springdoc:
