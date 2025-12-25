@@ -65,7 +65,8 @@ mybatis-plus:
 # JWT 配置
 jwt:
   secret: nkctf-secret-key-please-change-in-production-environment-2024
-  expiration: 604800000  # 7天 (毫秒)
+  access-token-expiration: 900000    # 15分钟 (毫秒)
+  refresh-token-expiration: 604800000  # 7天 (毫秒)
   header: Authorization
   prefix: Bearer
 

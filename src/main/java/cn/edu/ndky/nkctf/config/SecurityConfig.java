@@ -37,6 +37,7 @@ public class SecurityConfig {
     private static final String[] WHITE_LIST = {
             "/auth/login",
             "/auth/register",
+            "/auth/refresh",
             "/auth/captcha",
             "/attachments/download",
             "/swagger-ui/**",
@@ -79,7 +80,7 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOriginPatterns(List.of("*"));
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);

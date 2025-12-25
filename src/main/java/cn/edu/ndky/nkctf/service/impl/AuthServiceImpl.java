@@ -3,8 +3,11 @@ package cn.edu.ndky.nkctf.service.impl;
 import cn.edu.ndky.nkctf.dto.request.LoginRequest;
 import cn.edu.ndky.nkctf.dto.request.RegisterRequest;
 import cn.edu.ndky.nkctf.dto.response.LoginResponse;
+import cn.edu.ndky.nkctf.dto.response.TokenRefreshResponse;
+import cn.edu.ndky.nkctf.entity.RefreshToken;
 import cn.edu.ndky.nkctf.entity.User;
 import cn.edu.ndky.nkctf.exception.BusinessException;
+import cn.edu.ndky.nkctf.mapper.RefreshTokenMapper;
 import cn.edu.ndky.nkctf.mapper.UserMapper;
 import cn.edu.ndky.nkctf.service.AuthService;
 import cn.edu.ndky.nkctf.util.JwtUtil;
@@ -17,6 +20,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -34,12 +40,14 @@ public class AuthServiceImpl implements AuthService {
   private static final int LOCK_MINUTES = 30;
 
   private final UserMapper userMapper;
+  private final RefreshTokenMapper refreshTokenMapper;
   private final JwtUtil jwtUtil;
   private final PasswordEncoder passwordEncoder;
   private final RedisTemplate<String, Object> redisTemplate;
 
   @Override
-  public LoginResponse login(LoginRequest request) {
+  @Transactional
+  public LoginResponse login(LoginRequest request, String userAgent, String ipAddress) {
     String username = request.getUsername();
 
     // 检查账户是否被锁定
@@ -74,18 +82,60 @@ public class AuthServiceImpl implements AuthService {
     // 登录成功，清除失败计数
     clearLoginFailCount(username);
 
-    // 生成 JWT Token（7天有效期）
-    String token = jwtUtil.generateToken(user.getId(), user.getUsername());
+    // 生成双令牌
+    return generateTokenPair(user, userAgent, ipAddress);
+  }
+
+  /**
+   * 生成 Access Token 和 Refresh Token
+   */
+  private LoginResponse generateTokenPair(User user, String userAgent, String ipAddress) {
+    // 生成 Access Token (JWT, 15分钟)
+    String accessToken = jwtUtil.generateToken(user.getId(), user.getUsername());
+
+    // 生成 Refresh Token (高熵随机值, 7天)
+    String refreshTokenValue = generateRefreshToken();
+
+    // 保存 Refresh Token 到数据库
+    RefreshToken refreshToken = new RefreshToken();
+    refreshToken.setToken(refreshTokenValue);
+    refreshToken.setUserId(user.getId());
+    refreshToken.setUserAgent(truncateUserAgent(userAgent));
+    refreshToken.setIpAddress(ipAddress);
+    refreshToken.setExpiresAt(
+        LocalDateTime.now().plus(jwtUtil.getRefreshTokenExpiration(), ChronoUnit.MILLIS));
+    refreshToken.setRevoked(false);
+    refreshTokenMapper.insert(refreshToken);
 
     log.info("用户登录成功: {}", user.getUsername());
 
     return LoginResponse.builder()
-        .token(token)
+        .accessToken(accessToken)
+        .refreshToken(refreshTokenValue)
+        .expiresIn(jwtUtil.getAccessTokenExpiration() / 1000) // 转换为秒
         .userId(user.getId())
         .username(user.getUsername())
         .nickname(user.getNickname())
         .role(user.getRole())
         .build();
+  }
+
+  /**
+   * 生成 Refresh Token (高熵随机值)
+   */
+  private String generateRefreshToken() {
+    return UUID.randomUUID().toString().replace("-", "") +
+        UUID.randomUUID().toString().replace("-", "");
+  }
+
+  /**
+   * 截断 User-Agent (最大 500 字符)
+   */
+  private String truncateUserAgent(String userAgent) {
+    if (userAgent == null) {
+      return null;
+    }
+    return userAgent.length() > 500 ? userAgent.substring(0, 500) : userAgent;
   }
 
   /**
@@ -136,7 +186,7 @@ public class AuthServiceImpl implements AuthService {
 
   @Override
   @Transactional
-  public LoginResponse register(RegisterRequest request) {
+  public LoginResponse register(RegisterRequest request, String userAgent, String ipAddress) {
     // 检查用户名是否已存在
     Long usernameCount = userMapper.selectCount(
         new LambdaQueryWrapper<User>()
@@ -173,11 +223,71 @@ public class AuthServiceImpl implements AuthService {
 
     log.info("用户注册成功: {}", user.getUsername());
 
-    // 生成 JWT Token 并返回（注册成功后自动登录）
-    String token = jwtUtil.generateToken(user.getId(), user.getUsername());
+    // 生成双令牌并返回（注册成功后自动登录）
+    return generateTokenPair(user, userAgent, ipAddress);
+  }
 
-    return LoginResponse.builder()
-        .token(token)
+  @Override
+  @Transactional
+  public TokenRefreshResponse refreshToken(String refreshTokenValue, String userAgent,
+      String ipAddress) {
+    // 查询 Refresh Token
+    RefreshToken refreshToken = refreshTokenMapper.selectOne(
+        new LambdaQueryWrapper<RefreshToken>()
+            .eq(RefreshToken::getToken, refreshTokenValue)
+    );
+
+    // Token 不存在
+    if (refreshToken == null) {
+      log.warn("刷新 Token 失败: Token 不存在");
+      throw new BusinessException(401, "无效的 Refresh Token");
+    }
+
+    // Token 已被撤销
+    if (Boolean.TRUE.equals(refreshToken.getRevoked())) {
+      log.warn("刷新 Token 失败: Token 已被撤销 - userId: {}", refreshToken.getUserId());
+      // 安全措施：检测到被撤销的 Token 被重用，可能是 Token 被盗，撤销该用户所有 Token
+      refreshTokenMapper.revokeAllByUserId(refreshToken.getUserId());
+      throw new BusinessException(401, "Refresh Token 已失效");
+    }
+
+    // Token 已过期
+    if (refreshToken.getExpiresAt().isBefore(LocalDateTime.now())) {
+      log.warn("刷新 Token 失败: Token 已过期 - userId: {}", refreshToken.getUserId());
+      throw new BusinessException(401, "Refresh Token 已过期");
+    }
+
+    // 查询用户
+    User user = userMapper.selectById(refreshToken.getUserId());
+    if (user == null || !Boolean.TRUE.equals(user.getEnabled())) {
+      log.warn("刷新 Token 失败: 用户不存在或已禁用 - userId: {}", refreshToken.getUserId());
+      throw new BusinessException(401, "用户不存在或已被禁用");
+    }
+
+    // Token 轮转：撤销旧 Token
+    refreshTokenMapper.revokeByToken(refreshTokenValue);
+
+    // 生成新的 Access Token
+    String newAccessToken = jwtUtil.generateToken(user.getId(), user.getUsername());
+
+    // 生成新的 Refresh Token
+    String newRefreshTokenValue = generateRefreshToken();
+    RefreshToken newRefreshToken = new RefreshToken();
+    newRefreshToken.setToken(newRefreshTokenValue);
+    newRefreshToken.setUserId(user.getId());
+    newRefreshToken.setUserAgent(truncateUserAgent(userAgent));
+    newRefreshToken.setIpAddress(ipAddress);
+    newRefreshToken.setExpiresAt(
+        LocalDateTime.now().plus(jwtUtil.getRefreshTokenExpiration(), ChronoUnit.MILLIS));
+    newRefreshToken.setRevoked(false);
+    refreshTokenMapper.insert(newRefreshToken);
+
+    log.info("Token 刷新成功: userId={}", user.getId());
+
+    return TokenRefreshResponse.builder()
+        .accessToken(newAccessToken)
+        .refreshToken(newRefreshTokenValue)
+        .expiresIn(jwtUtil.getAccessTokenExpiration() / 1000)
         .userId(user.getId())
         .username(user.getUsername())
         .nickname(user.getNickname())
@@ -186,30 +296,42 @@ public class AuthServiceImpl implements AuthService {
   }
 
   @Override
-  public void logout(String token) {
-    try {
-      // 获取 Token 剩余有效时间
-      var claims = jwtUtil.parseToken(token);
-      long expiration = claims.getExpiration().getTime();
-      long now = System.currentTimeMillis();
-      long ttl = expiration - now;
+  @Transactional
+  public void logout(String accessToken, String refreshToken) {
+    // 将 Access Token 加入黑名单
+    if (StringUtils.hasText(accessToken)) {
+      try {
+        var claims = jwtUtil.parseToken(accessToken);
+        long expiration = claims.getExpiration().getTime();
+        long now = System.currentTimeMillis();
+        long ttl = expiration - now;
 
-      if (ttl > 0) {
-        // 将 Token 加入黑名单，有效期为 Token 剩余时间
-        String blacklistKey = TOKEN_BLACKLIST_KEY + token;
-        redisTemplate.opsForValue().set(blacklistKey, "1", ttl, TimeUnit.MILLISECONDS);
-        log.info("用户登出成功，Token 已加入黑名单");
+        if (ttl > 0) {
+          String blacklistKey = TOKEN_BLACKLIST_KEY + accessToken;
+          redisTemplate.opsForValue().set(blacklistKey, "1", ttl, TimeUnit.MILLISECONDS);
+          log.info("Access Token 已加入黑名单");
+        }
+      } catch (Exception e) {
+        log.warn("登出时 Access Token 解析失败: {}", e.getMessage());
       }
-    } catch (Exception e) {
-      log.warn("登出时 Token 解析失败: {}", e.getMessage());
+    }
+
+    // 撤销 Refresh Token
+    if (StringUtils.hasText(refreshToken)) {
+      int count = refreshTokenMapper.revokeByToken(refreshToken);
+      if (count > 0) {
+        log.info("Refresh Token 已撤销");
+      }
     }
   }
 
-  /**
-   * 检查 Token 是否在黑名单中
-   * @param token JWT Token
-   * @return true 如果在黑名单中
-   */
+  @Override
+  @Transactional
+  public void logoutAll(Long userId) {
+    int count = refreshTokenMapper.revokeAllByUserId(userId);
+    log.info("已撤销用户所有 Refresh Token: userId={}, count={}", userId, count);
+  }
+
   @Override
   public boolean isTokenBlacklisted(String token) {
     String blacklistKey = TOKEN_BLACKLIST_KEY + token;

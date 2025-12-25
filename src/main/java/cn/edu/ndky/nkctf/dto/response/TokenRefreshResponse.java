@@ -6,21 +6,21 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 登录响应 DTO
+ * Token 刷新响应 DTO
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class LoginResponse {
+public class TokenRefreshResponse {
 
   /**
-   * Access Token (JWT)
+   * 新的 Access Token (JWT)
    */
   private String accessToken;
 
   /**
-   * Refresh Token
+   * 新的 Refresh Token
    */
   private String refreshToken;
 

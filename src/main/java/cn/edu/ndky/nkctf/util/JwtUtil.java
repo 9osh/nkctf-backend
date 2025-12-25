@@ -22,11 +22,28 @@ public class JwtUtil {
     @Value("${jwt.secret}")
     private String secret;
 
-    @Value("${jwt.expiration}")
-    private Long expiration;
+    @Value("${jwt.access-token-expiration}")
+    private Long accessTokenExpiration;
+
+    @Value("${jwt.refresh-token-expiration}")
+    private Long refreshTokenExpiration;
 
     private SecretKey getSecretKey() {
         return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * 获取 Access Token 过期时间（毫秒）
+     */
+    public Long getAccessTokenExpiration() {
+        return accessTokenExpiration;
+    }
+
+    /**
+     * 获取 Refresh Token 过期时间（毫秒）
+     */
+    public Long getRefreshTokenExpiration() {
+        return refreshTokenExpiration;
     }
 
     /**
@@ -41,7 +58,7 @@ public class JwtUtil {
                 .claims(claims)
                 .subject(username)
                 .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + expiration))
+                .expiration(new Date(System.currentTimeMillis() + accessTokenExpiration))
                 .signWith(getSecretKey())
                 .compact();
     }
