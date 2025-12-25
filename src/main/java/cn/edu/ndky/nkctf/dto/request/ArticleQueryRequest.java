@@ -8,7 +8,7 @@ import lombok.Data;
 @Data
 public class ArticleQueryRequest {
 
-  public static final int PAGE_SIZE = 20;
+  public static final int PAGE_SIZE = 30;
 
   /**
    * 标签 ID 过滤
