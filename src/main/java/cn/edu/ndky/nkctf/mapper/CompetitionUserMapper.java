@@ -76,4 +76,14 @@ public interface CompetitionUserMapper extends BaseMapper<CompetitionUser> {
         )
       """)
   Integer getUserRank(@Param("competitionId") Long competitionId, @Param("userId") Long userId);
+
+  /**
+   * 重置竞赛中所有用户的积分为 0（动态积分重新计算时使用）
+   */
+  @Update("""
+      UPDATE competition_user
+      SET score = 0
+      WHERE competition_id = #{competitionId}
+      """)
+  void resetAllScores(@Param("competitionId") Long competitionId);
 }

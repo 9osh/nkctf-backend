@@ -29,6 +29,28 @@ public class AdminChallengeDetailResponse {
 
   private Integer points;
 
+  // ========== 动态积分配置 ==========
+
+  /**
+   * 计分类型: STATIC, DYNAMIC
+   */
+  private String scoringType;
+
+  /**
+   * 动态积分最大值 (初始分值)
+   */
+  private Integer maxPoints;
+
+  /**
+   * 动态积分最小值 (下限)
+   */
+  private Integer minPoints;
+
+  /**
+   * 衰减参数 (达到最小值所需的解题数)
+   */
+  private Integer decay;
+
   private String author;
 
   /**

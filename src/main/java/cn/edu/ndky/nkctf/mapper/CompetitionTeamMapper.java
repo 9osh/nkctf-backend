@@ -76,4 +76,14 @@ public interface CompetitionTeamMapper extends BaseMapper<CompetitionTeam> {
         )
       """)
   Integer getTeamRank(@Param("competitionId") Long competitionId, @Param("teamId") UUID teamId);
+
+  /**
+   * 重置竞赛中所有队伍的积分为 0（动态积分重新计算时使用）
+   */
+  @Update("""
+      UPDATE competition_team
+      SET score = 0
+      WHERE competition_id = #{competitionId}
+      """)
+  void resetAllScores(@Param("competitionId") Long competitionId);
 }

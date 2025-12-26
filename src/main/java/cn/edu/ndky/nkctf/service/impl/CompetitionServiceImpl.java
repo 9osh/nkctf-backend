@@ -10,6 +10,7 @@ import cn.edu.ndky.nkctf.entity.*;
 import cn.edu.ndky.nkctf.exception.BusinessException;
 import cn.edu.ndky.nkctf.mapper.*;
 import cn.edu.ndky.nkctf.service.CompetitionService;
+import cn.edu.ndky.nkctf.service.DynamicScoringService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -78,6 +79,7 @@ public class CompetitionServiceImpl implements CompetitionService {
   private final UserMapper userMapper;
   private final TeamMapper teamMapper;
   private final StringRedisTemplate stringRedisTemplate;
+  private final DynamicScoringService dynamicScoringService;
 
   private static final String DYNAMIC_FLAG_KEY_PREFIX = "nkctf:flag:";
   private static final String CONTAINER_CHALLENGE_USER_PREFIX = "nkctf:container:challenge:";
@@ -209,6 +211,9 @@ public class CompetitionServiceImpl implements CompetitionService {
     log.info("用户 {} 查看竞赛 {} 的题目 {}",
         currentUser.getUsername(), competition.getName(), challenge.getTitle());
 
+    // 计算动态积分当前值
+    int currentPoints = dynamicScoringService.calculateCurrentPoints(challenge, solves);
+
     return CompetitionChallengeDetailResponse.builder()
         .competitionId(competitionId)
         .challengeId(challengeId)
@@ -217,6 +222,11 @@ public class CompetitionServiceImpl implements CompetitionService {
         .category(challenge.getCategory())
         .difficulty(challenge.getDifficulty())
         .points(challenge.getPoints())
+        .scoringType(challenge.getScoringType())
+        .currentPoints(currentPoints)
+        .maxPoints(challenge.getMaxPoints())
+        .minPoints(challenge.getMinPoints())
+        .decay(challenge.getDecay())
         .solves(solves)
         .solved(solved)
         .author(challenge.getAuthor())
@@ -717,7 +727,7 @@ public class CompetitionServiceImpl implements CompetitionService {
     }
 
     try {
-      // ========== 检查是否已解决 ==========
+      // ========== 检查是否已解决（用于判断是否计分，不阻止重复提交） ==========
       boolean alreadySolved;
       if (Boolean.TRUE.equals(competition.getIsTeamCompetition())) {
         alreadySolved = Boolean.TRUE.equals(submissionMapper.hasTeamSolvedInCompetition(
@@ -725,18 +735,6 @@ public class CompetitionServiceImpl implements CompetitionService {
       } else {
         alreadySolved = Boolean.TRUE.equals(submissionMapper.hasUserSolvedInCompetition(
             competition.getId(), currentUser.getId(), challenge.getId()));
-      }
-
-      if (alreadySolved) {
-        Integer score = getParticipantScore(competition, currentUser);
-        Integer rank = getParticipantRank(competition, currentUser);
-        return CompetitionSubmitFlagResponse.builder()
-            .correct(false)
-            .message("该题目已被解决")
-            .totalScore(score)
-            .rank(rank)
-            .scored(false)
-            .build();
       }
 
       // 动态题目需要检查容器是否活跃
@@ -760,56 +758,115 @@ public class CompetitionServiceImpl implements CompetitionService {
       String correctFlag = getCorrectFlag(challenge, currentUser.getId());
       boolean isCorrect = correctFlag != null && correctFlag.equals(submittedFlag);
 
-      // 判断是否计分（只有 active 状态才计分）
-      boolean shouldScore = Competition.Status.ACTIVE.getValue().equals(competition.getStatus());
+      // 判断是否计分（只有 active 状态且首次正确提交才计分）
+      boolean isActive = Competition.Status.ACTIVE.getValue().equals(competition.getStatus());
+      boolean shouldScore = isCorrect && isActive && !alreadySolved;
 
       // ========== 创建提交记录 ==========
-      Submission submission = new Submission();
-      submission.setUserId(currentUser.getId());  // 从 JWT 获取
-      submission.setChallengeId(challenge.getId());
-      submission.setCompetitionId(competition.getId());
-      submission.setFlag(submittedFlag);
-      submission.setIsCorrect(isCorrect);
+      // 注意：数据库有唯一索引 idx_submission_competition_correct_unique 限制
+      // 同一队伍/用户在同一竞赛中对同一题目只能有一条 is_correct=true 的记录，因此：
+      // - 首次正确提交：插入 is_correct=true 的记录
+      // - 重复正确提交：跳过插入（已有正确记录）
+      // - 错误提交：始终插入 is_correct=false 的记录
+      Submission submission = null;
+      if (!isCorrect || !alreadySolved) {
+        submission = new Submission();
+        submission.setUserId(currentUser.getId());  // 从 JWT 获取
+        submission.setChallengeId(challenge.getId());
+        submission.setCompetitionId(competition.getId());
+        submission.setFlag(submittedFlag);
+        submission.setIsCorrect(isCorrect);
 
-      if (Boolean.TRUE.equals(competition.getIsTeamCompetition())) {
-        submission.setTeamId(currentUser.getTeamId());  // 从数据库获取
+        if (Boolean.TRUE.equals(competition.getIsTeamCompetition())) {
+          submission.setTeamId(currentUser.getTeamId());  // 从数据库获取
+        }
       }
 
-      if (isCorrect && shouldScore) {
-        submission.setPointsAwarded(challenge.getPoints());
+      // ========== 动态积分计算 ==========
+      int pointsAwarded = 0;
+      int firstBloodBonus = 0;
+      Integer firstBloodRank = null;
+
+      if (shouldScore) {
+        boolean isTeamCompetition = Boolean.TRUE.equals(competition.getIsTeamCompetition());
+
+        // 获取当前解题排名（在插入新提交之前）
+        int solveRank = dynamicScoringService.getNextSolveRank(
+            competition.getId(), challenge.getId(), isTeamCompetition);
+
+        // 计算积分
+        if (dynamicScoringService.isDynamicScoring(challenge)) {
+          // 动态积分：根据当前解题数计算分值
+          int currentSolves = solveRank - 1;  // 当前解题数（不含本次）
+          pointsAwarded = dynamicScoringService.calculateCurrentPoints(challenge, currentSolves + 1);
+          firstBloodBonus = dynamicScoringService.calculateFirstBloodBonus(pointsAwarded, solveRank);
+          if (solveRank <= 3) {
+            firstBloodRank = solveRank;
+          }
+
+          log.info("动态积分: 竞赛={}, 题目={}, 排名={}, 基础分={}, 一血奖励={}",
+              competition.getName(), challenge.getTitle(), solveRank, pointsAwarded, firstBloodBonus);
+        } else {
+          // 静态积分：使用固定分值
+          pointsAwarded = challenge.getPoints() != null ? challenge.getPoints() : 0;
+          // 静态积分也支持一血奖励
+          firstBloodBonus = dynamicScoringService.calculateFirstBloodBonus(pointsAwarded, solveRank);
+          if (solveRank <= 3) {
+            firstBloodRank = solveRank;
+          }
+        }
+
+        int totalPoints = pointsAwarded + firstBloodBonus;
 
         // 更新参赛者分数
-        if (Boolean.TRUE.equals(competition.getIsTeamCompetition())) {
+        if (isTeamCompetition) {
           competitionTeamMapper.addTeamScore(
-              competition.getId(), currentUser.getTeamId(), challenge.getPoints());
-          log.info("竞赛 {} 中队伍 {} 解决了题目 {}，获得 {} 分",
+              competition.getId(), currentUser.getTeamId(), totalPoints);
+          log.info("竞赛 {} 中队伍 {} 解决了题目 {}，获得 {} 分 (基础: {}, 一血: {})",
               competition.getName(), currentUser.getTeamId(),
-              challenge.getTitle(), challenge.getPoints());
+              challenge.getTitle(), totalPoints, pointsAwarded, firstBloodBonus);
         } else {
           competitionUserMapper.addUserScore(
-              competition.getId(), currentUser.getId(), challenge.getPoints());
-          log.info("竞赛 {} 中用户 {} 解决了题目 {}，获得 {} 分",
+              competition.getId(), currentUser.getId(), totalPoints);
+          log.info("竞赛 {} 中用户 {} 解决了题目 {}，获得 {} 分 (基础: {}, 一血: {})",
               competition.getName(), currentUser.getUsername(),
-              challenge.getTitle(), challenge.getPoints());
+              challenge.getTitle(), totalPoints, pointsAwarded, firstBloodBonus);
         }
-      } else {
-        submission.setPointsAwarded(0);
+
+        // 动态积分需要重新计算之前解题者的积分
+        if (dynamicScoringService.isDynamicScoring(challenge) && solveRank > 1) {
+          dynamicScoringService.recalculateChallengeScores(
+              competition.getId(), challenge.getId(), isTeamCompetition);
+        }
       }
 
-      submissionMapper.insert(submission);
+      // 只有在创建了提交记录时才插入
+      if (submission != null) {
+        submission.setPointsAwarded(pointsAwarded);
+        submission.setFirstBloodRank(firstBloodRank);
+        submission.setFirstBloodBonus(firstBloodBonus);
+        submissionMapper.insert(submission);
+      }
 
       // ========== 构建响应 ==========
       Integer totalScore = getParticipantScore(competition, currentUser);
       Integer rank = getParticipantRank(competition, currentUser);
 
       if (isCorrect) {
-        String message = shouldScore
-            ? "恭喜你，Flag 正确！"
-            : "Flag 正确，但竞赛已结束，不计分。";
+        String message;
+        if (alreadySolved) {
+          message = "Flag 正确！该题目已被解决";
+        } else if (isActive) {
+          message = "恭喜你，Flag 正确！";
+        } else {
+          message = "Flag 正确，但竞赛已结束，不计分。";
+        }
+
+        int totalPointsAwarded = pointsAwarded + firstBloodBonus;
 
         return CompetitionSubmitFlagResponse.builder()
             .correct(true)
-            .pointsAwarded(shouldScore ? challenge.getPoints() : 0)
+            .pointsAwarded(shouldScore ? totalPointsAwarded : 0)
             .message(message)
             .totalScore(totalScore)
             .rank(rank)

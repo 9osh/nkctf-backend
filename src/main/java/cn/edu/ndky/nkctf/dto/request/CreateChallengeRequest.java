@@ -53,4 +53,29 @@ public class CreateChallengeRequest {
    * 是否启用（默认 false）
    */
   private Boolean enabled;
+
+  // ========== 动态积分配置（仅竞赛模式） ==========
+
+  /**
+   * 计分类型: STATIC (默认), DYNAMIC (仅竞赛模式)
+   */
+  private String scoringType;
+
+  /**
+   * 动态积分最大值 (初始分值) - 竞赛模式使用
+   */
+  @Min(value = 1, message = "maxPoints 最小为 1")
+  private Integer maxPoints;
+
+  /**
+   * 动态积分最小值 (下限) - 竞赛模式使用
+   */
+  @Min(value = 1, message = "minPoints 最小为 1")
+  private Integer minPoints;
+
+  /**
+   * 衰减参数 (达到最小值所需的解题数)
+   */
+  @Min(value = 1, message = "decay 最小为 1")
+  private Integer decay;
 }

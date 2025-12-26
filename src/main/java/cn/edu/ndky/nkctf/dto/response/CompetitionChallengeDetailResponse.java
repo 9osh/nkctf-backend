@@ -27,6 +27,31 @@ public class CompetitionChallengeDetailResponse {
   private Integer points;
 
   /**
+   * 计分类型: STATIC-固定分值, DYNAMIC-动态积分
+   */
+  private String scoringType;
+
+  /**
+   * 动态积分当前值（根据解题数计算）
+   */
+  private Integer currentPoints;
+
+  /**
+   * 动态积分最大值 (初始分值)
+   */
+  private Integer maxPoints;
+
+  /**
+   * 动态积分最小值 (下限)
+   */
+  private Integer minPoints;
+
+  /**
+   * 衰减参数 (达到最小值所需的解题数)
+   */
+  private Integer decay;
+
+  /**
    * 解题人数（竞赛内）
    */
   private Integer solves;

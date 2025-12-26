@@ -110,4 +110,14 @@ public interface UserMapper extends BaseMapper<User> {
       WHERE id = #{userId}
       """)
   void updateLeaderboardFields(@Param("userId") Long userId);
+
+  /**
+   * 增加/减少用户积分（练习模式题目分值变更时使用）
+   */
+  @Update("""
+      UPDATE sys_user
+      SET score = COALESCE(score, 0) + #{pointsDiff}
+      WHERE id = #{userId}
+      """)
+  void addUserScore(@Param("userId") Long userId, @Param("pointsDiff") int pointsDiff);
 }

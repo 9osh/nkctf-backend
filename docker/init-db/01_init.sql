@@ -66,6 +66,11 @@ CREATE TABLE IF NOT EXISTS challenge (
     category VARCHAR(50) NOT NULL,
     difficulty VARCHAR(20) DEFAULT 'MEDIUM',
     points INTEGER DEFAULT 100,
+    -- 动态积分配置 (仅竞赛模式使用)
+    scoring_type VARCHAR(20) DEFAULT 'STATIC', -- STATIC: 固定分值, DYNAMIC: 动态积分
+    max_points INTEGER DEFAULT 500,            -- 动态积分最大值 (初始分值)
+    min_points INTEGER DEFAULT 50,             -- 动态积分最小值 (下限)
+    decay INTEGER DEFAULT 20,                  -- 衰减参数 (达到最小值所需的解题数)
     author VARCHAR(100),
     flag VARCHAR(255),
     is_dynamic BOOLEAN DEFAULT FALSE,
@@ -118,6 +123,9 @@ CREATE TABLE IF NOT EXISTS submission (
     flag VARCHAR(255) NOT NULL,
     is_correct BOOLEAN DEFAULT FALSE,
     points_awarded INTEGER DEFAULT 0,
+    -- 一血奖励 (仅竞赛模式)
+    first_blood_rank INTEGER,           -- 解题排名 (1=一血, 2=二血, 3=三血, NULL=其他)
+    first_blood_bonus INTEGER DEFAULT 0, -- 一血额外奖励积分
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -230,6 +238,16 @@ COMMENT ON TABLE competition_challenge IS '竞赛题目表';
 COMMENT ON TABLE submission IS '解题记录表';
 COMMENT ON TABLE hint IS '题目提示表';
 COMMENT ON TABLE hint_unlock IS '提示获取记录表';
+
+-- 题目表动态积分字段注释
+COMMENT ON COLUMN challenge.scoring_type IS '计分类型: STATIC-固定分值, DYNAMIC-动态积分';
+COMMENT ON COLUMN challenge.max_points IS '动态积分最大值 (初始分值)';
+COMMENT ON COLUMN challenge.min_points IS '动态积分最小值 (下限)';
+COMMENT ON COLUMN challenge.decay IS '衰减参数 (达到最小值所需的解题数)';
+
+-- 解题记录表一血字段注释
+COMMENT ON COLUMN submission.first_blood_rank IS '解题排名 (1=一血, 2=二血, 3=三血, NULL=其他)';
+COMMENT ON COLUMN submission.first_blood_bonus IS '一血额外奖励积分';
 
 -- 插入密码学 CTF 题目 (练习题目，enabled=TRUE)
 INSERT INTO challenge (title, description, content, category, difficulty, points, author, flag, is_dynamic, enabled, attachment_url, attachment_name)
@@ -495,3 +513,73 @@ VALUES (
     '2025-01-03 18:00:00'
 )
 ON CONFLICT (name) DO NOTHING;
+
+-- 插入动态积分题目示例 (用于竞赛)
+-- 动态积分公式: currentPoints = max(minPoints, ((minPoints - maxPoints) / decay²) × solves² + maxPoints)
+INSERT INTO challenge (title, description, content, category, difficulty, points, scoring_type, max_points, min_points, decay, author, flag, is_dynamic, enabled)
+VALUES
+(
+    'SQL 注入基础',
+    '最经典的 Web 漏洞之一',
+    E'## 题目描述\n\n这是一个存在 SQL 注入漏洞的登录页面。\n\n你能绕过身份验证获取管理员权限吗？\n\n## 提示\n\n- 单引号是你的好朋友\n- 注意观察错误信息\n\n## Flag 格式\n\n`nkctf{...}`',
+    'WEB',
+    'EASY',
+    500,  -- 静态分值 (练习模式使用)
+    'DYNAMIC',  -- 竞赛模式使用动态积分
+    500,  -- 最大分值
+    100,  -- 最小分值
+    15,   -- 15 人解出后达到最小值
+    'admin',
+    'nkctf{sql_1nj3ct10n_b4s1c}',
+    FALSE,
+    TRUE
+),
+(
+    'XSS 跨站脚本',
+    '让浏览器执行你的代码',
+    E'## 题目描述\n\n这是一个存在反射型 XSS 漏洞的留言板。\n\n你能让页面弹出 alert(1) 吗？\n\n## Flag 格式\n\n`nkctf{...}`',
+    'WEB',
+    'MEDIUM',
+    500,
+    'DYNAMIC',
+    500,
+    100,
+    20,
+    'admin',
+    'nkctf{xss_r3fl3ct3d_att4ck}',
+    FALSE,
+    TRUE
+),
+(
+    'RSA 入门',
+    '非对称加密的基石',
+    E'## 题目描述\n\n给定以下 RSA 参数：\n\n```\nn = 3233\ne = 17\nc = 2790\n```\n\n请解密密文 c，获取原始消息 m。\n\n## 提示\n\nn 是两个小质数的乘积\n\n## Flag 格式\n\n`nkctf{m}` 其中 m 是解密后的数字',
+    'CRYPTO',
+    'MEDIUM',
+    500,
+    'DYNAMIC',
+    500,
+    150,
+    25,
+    'admin',
+    'nkctf{65}',
+    FALSE,
+    TRUE
+),
+(
+    '栈溢出入门',
+    'PWN 的第一步',
+    E'## 题目描述\n\n这是一个简单的栈溢出题目。\n\n程序中存在一个 gets() 函数，你能利用它覆盖返回地址吗？\n\n## Flag 格式\n\n`nkctf{...}`',
+    'PWN',
+    'HARD',
+    500,
+    'DYNAMIC',
+    500,
+    200,
+    10,
+    'admin',
+    'nkctf{st4ck_0v3rfl0w_b4s1c}',
+    FALSE,
+    TRUE
+)
+ON CONFLICT DO NOTHING;

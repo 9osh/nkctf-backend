@@ -9,6 +9,7 @@ import cn.edu.ndky.nkctf.exception.BusinessException;
 import cn.edu.ndky.nkctf.mapper.ChallengeMapper;
 import cn.edu.ndky.nkctf.mapper.SubmissionMapper;
 import cn.edu.ndky.nkctf.mapper.UserMapper;
+import cn.edu.ndky.nkctf.service.DynamicScoringService;
 import cn.edu.ndky.nkctf.service.SubmissionService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -60,6 +61,7 @@ public class SubmissionServiceImpl implements SubmissionService {
   private final ChallengeMapper challengeMapper;
   private final UserMapper userMapper;
   private final StringRedisTemplate stringRedisTemplate;
+  private final DynamicScoringService dynamicScoringService;
 
   @Override
   @Transactional
@@ -92,17 +94,9 @@ public class SubmissionServiceImpl implements SubmissionService {
     try {
       // ========== 业务逻辑 ==========
 
-      // 检查是否已经解决（防止重复计分）
+      // 检查是否已经解决（用于判断是否计分，不阻止重复提交）
       Boolean alreadySolved = submissionMapper.hasUserSolved(
           currentUser.getId(), challenge.getId());
-      if (Boolean.TRUE.equals(alreadySolved)) {
-        return SubmitFlagResponse.builder()
-            .correct(false)
-            .message("你已经解决了这道题目")
-            .totalScore(currentUser.getScore())
-            .rank(userMapper.getUserRank(currentUser.getId()))
-            .build();
-      }
 
       // 动态题目需要检查容器是否活跃
       if (Boolean.TRUE.equals(challenge.getIsDynamic())) {
@@ -124,35 +118,84 @@ public class SubmissionServiceImpl implements SubmissionService {
       String correctFlag = getCorrectFlag(challenge, currentUser.getId());
       boolean isCorrect = correctFlag != null && correctFlag.equals(submittedFlag);
 
-      // 创建提交记录（使用服务端获取的用户 ID）
-      Submission submission = new Submission();
-      submission.setUserId(currentUser.getId());  // 从 JWT 获取，非请求参数
-      submission.setChallengeId(challenge.getId());
-      submission.setFlag(submittedFlag);
-      submission.setIsCorrect(isCorrect);
-      submission.setPointsAwarded(isCorrect ? challenge.getPoints() : 0);
-      submissionMapper.insert(submission);
+      // 计算首杀奖励（仅首次正确提交时计算）
+      int solveRank = 0;
+      int firstBloodBonus = 0;
+      int basePoints = challenge.getPoints() != null ? challenge.getPoints() : 0;
+      boolean shouldScore = isCorrect && !Boolean.TRUE.equals(alreadySolved);
+
+      if (shouldScore) {
+        solveRank = submissionMapper.getNextPracticeSolveRank(challenge.getId());
+        firstBloodBonus = dynamicScoringService.calculateFirstBloodBonus(basePoints, solveRank);
+      }
+
+      // 创建提交记录
+      // 注意：数据库有唯一索引 idx_submission_correct_unique 限制同一用户对同一题目
+      // 在练习模式下只能有一条 is_correct=true 的记录，因此：
+      // - 首次正确提交：插入 is_correct=true 的记录
+      // - 重复正确提交：跳过插入（已有正确记录）
+      // - 错误提交：始终插入 is_correct=false 的记录
+      if (!isCorrect || !Boolean.TRUE.equals(alreadySolved)) {
+        Submission submission = new Submission();
+        submission.setUserId(currentUser.getId());  // 从 JWT 获取，非请求参数
+        submission.setChallengeId(challenge.getId());
+        submission.setFlag(submittedFlag);
+        submission.setIsCorrect(isCorrect);
+        submission.setPointsAwarded(shouldScore ? basePoints : 0);
+        // 设置首杀信息（仅首次正确提交）
+        if (shouldScore && solveRank <= 3) {
+          submission.setFirstBloodRank(solveRank);
+          submission.setFirstBloodBonus(firstBloodBonus);
+        }
+        submissionMapper.insert(submission);
+      }
 
       if (isCorrect) {
-        // 更新用户分数（服务端计算）
-        int newScore = (currentUser.getScore() != null ? currentUser.getScore() : 0)
-            + challenge.getPoints();
-        currentUser.setScore(newScore);
-        userMapper.updateById(currentUser);
+        if (shouldScore) {
+          // 首次正确提交 - 计分
+          int totalPointsAwarded = basePoints + firstBloodBonus;
 
-        // 更新排行榜冗余字段
-        userMapper.updateLeaderboardFields(currentUser.getId());
+          // 更新用户分数（服务端计算）
+          int newScore = (currentUser.getScore() != null ? currentUser.getScore() : 0)
+              + totalPointsAwarded;
+          currentUser.setScore(newScore);
+          userMapper.updateById(currentUser);
 
-        log.info("用户 {} 成功解决题目 {}，获得 {} 分",
-            currentUser.getUsername(), challenge.getTitle(), challenge.getPoints());
+          // 更新排行榜冗余字段
+          userMapper.updateLeaderboardFields(currentUser.getId());
 
-        return SubmitFlagResponse.builder()
-            .correct(true)
-            .pointsAwarded(challenge.getPoints())
-            .message("恭喜你，Flag 正确！")
-            .totalScore(currentUser.getScore())
-            .rank(userMapper.getUserRank(currentUser.getId()))
-            .build();
+          // 日志记录
+          if (firstBloodBonus > 0) {
+            log.info("用户 {} 成功解决题目 {}，获得 {} 分（基础 {} + 首杀奖励 {}，排名 #{}）",
+                currentUser.getUsername(), challenge.getTitle(),
+                totalPointsAwarded, basePoints, firstBloodBonus, solveRank);
+          } else {
+            log.info("用户 {} 成功解决题目 {}，获得 {} 分",
+                currentUser.getUsername(), challenge.getTitle(), basePoints);
+          }
+
+          return SubmitFlagResponse.builder()
+              .correct(true)
+              .pointsAwarded(totalPointsAwarded)
+              .message(firstBloodBonus > 0
+                  ? String.format("恭喜你，Flag 正确！获得首杀奖励 +%d 分（排名 #%d）", firstBloodBonus, solveRank)
+                  : "恭喜你，Flag 正确！")
+              .totalScore(currentUser.getScore())
+              .rank(userMapper.getUserRank(currentUser.getId()))
+              .build();
+        } else {
+          // 重复正确提交 - 不计分，但返回正确
+          log.debug("用户 {} 重复提交了正确的 Flag，题目: {}",
+              currentUser.getUsername(), challenge.getTitle());
+
+          return SubmitFlagResponse.builder()
+              .correct(true)
+              .pointsAwarded(0)
+              .message("Flag 正确！你已经解决过这道题目")
+              .totalScore(currentUser.getScore())
+              .rank(userMapper.getUserRank(currentUser.getId()))
+              .build();
+        }
       } else {
         log.debug("用户 {} 提交了错误的 Flag，题目: {}",
             currentUser.getUsername(), challenge.getTitle());

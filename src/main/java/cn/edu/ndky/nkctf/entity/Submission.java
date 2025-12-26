@@ -36,6 +36,17 @@ public class Submission {
 
   private Integer pointsAwarded;
 
+  /**
+   * 解题排名 (1=一血, 2=二血, 3=三血, NULL=其他)
+   * 仅竞赛模式有效
+   */
+  private Integer firstBloodRank;
+
+  /**
+   * 一血额外奖励积分
+   */
+  private Integer firstBloodBonus;
+
   @TableField(fill = FieldFill.INSERT)
   private LocalDateTime createTime;
 }

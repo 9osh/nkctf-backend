@@ -22,6 +22,11 @@ public class AdminChallengeListItemResponse {
 
   private Integer points;
 
+  /**
+   * 计分类型: STATIC, DYNAMIC
+   */
+  private String scoringType;
+
   private String author;
 
   private Boolean isDynamic;

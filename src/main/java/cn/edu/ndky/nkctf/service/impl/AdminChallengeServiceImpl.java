@@ -4,6 +4,7 @@ import cn.edu.ndky.nkctf.dto.request.*;
 import cn.edu.ndky.nkctf.dto.response.*;
 import cn.edu.ndky.nkctf.entity.Challenge;
 import cn.edu.ndky.nkctf.entity.Hint;
+import cn.edu.ndky.nkctf.entity.Submission;
 import cn.edu.ndky.nkctf.entity.User;
 import cn.edu.ndky.nkctf.exception.BusinessException;
 import cn.edu.ndky.nkctf.mapper.ChallengeMapper;
@@ -11,6 +12,7 @@ import cn.edu.ndky.nkctf.mapper.HintMapper;
 import cn.edu.ndky.nkctf.mapper.SubmissionMapper;
 import cn.edu.ndky.nkctf.mapper.UserMapper;
 import cn.edu.ndky.nkctf.service.AdminChallengeService;
+import cn.edu.ndky.nkctf.service.DynamicScoringService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -47,6 +50,7 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
   private final HintMapper hintMapper;
   private final SubmissionMapper submissionMapper;
   private final UserMapper userMapper;
+  private final DynamicScoringService dynamicScoringService;
 
   private static final DateTimeFormatter DATE_FORMATTER =
       DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -56,6 +60,9 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
 
   private static final Set<String> ALLOWED_DIFFICULTIES =
       Set.of("EASY", "MEDIUM", "HARD");
+
+  private static final Set<String> ALLOWED_SCORING_TYPES =
+      Set.of("STATIC", "DYNAMIC");
 
   @Value("${app.upload.path:./uploads}")
   private String uploadPath;
@@ -154,6 +161,27 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
       }
     }
 
+    // 验证计分类型
+    String scoringType = request.getScoringType();
+    if (scoringType == null || scoringType.isBlank()) {
+      scoringType = "STATIC";
+    } else {
+      scoringType = scoringType.toUpperCase();
+      if (!ALLOWED_SCORING_TYPES.contains(scoringType)) {
+        throw new BusinessException(400, "无效的计分类型: " + request.getScoringType());
+      }
+    }
+
+    // 验证动态积分配置
+    if ("DYNAMIC".equals(scoringType)) {
+      if (request.getMaxPoints() == null || request.getMinPoints() == null) {
+        throw new BusinessException(400, "动态积分题目必须设置 maxPoints 和 minPoints");
+      }
+      if (request.getMaxPoints() <= request.getMinPoints()) {
+        throw new BusinessException(400, "maxPoints 必须大于 minPoints");
+      }
+    }
+
     Challenge challenge = new Challenge();
     challenge.setTitle(request.getTitle());
     challenge.setDescription(request.getDescription());
@@ -161,6 +189,10 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
     challenge.setCategory(category);
     challenge.setDifficulty(difficulty);
     challenge.setPoints(request.getPoints());
+    challenge.setScoringType(scoringType);
+    challenge.setMaxPoints(request.getMaxPoints() != null ? request.getMaxPoints() : 500);
+    challenge.setMinPoints(request.getMinPoints() != null ? request.getMinPoints() : 100);
+    challenge.setDecay(request.getDecay() != null ? request.getDecay() : 20);
     challenge.setAuthor(request.getAuthor());
     challenge.setFlag(request.getFlag());
     challenge.setIsDynamic(isDynamic);
@@ -183,6 +215,9 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
     if (challenge == null) {
       throw new BusinessException(404, "题目不存在");
     }
+
+    // 记录旧的分值（用于判断是否需要重新计算积分）
+    Integer oldPoints = challenge.getPoints();
 
     // 更新标题
     if (StringUtils.hasText(request.getTitle())) {
@@ -247,6 +282,26 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
       challenge.setEnabled(request.getEnabled());
     }
 
+    // 更新计分类型
+    if (StringUtils.hasText(request.getScoringType())) {
+      String scoringType = request.getScoringType().toUpperCase();
+      if (!ALLOWED_SCORING_TYPES.contains(scoringType)) {
+        throw new BusinessException(400, "无效的计分类型: " + request.getScoringType());
+      }
+      challenge.setScoringType(scoringType);
+    }
+
+    // 更新动态积分配置
+    if (request.getMaxPoints() != null) {
+      challenge.setMaxPoints(request.getMaxPoints());
+    }
+    if (request.getMinPoints() != null) {
+      challenge.setMinPoints(request.getMinPoints());
+    }
+    if (request.getDecay() != null) {
+      challenge.setDecay(request.getDecay());
+    }
+
     // 验证动态题目配置
     if (Boolean.TRUE.equals(challenge.getIsDynamic())) {
       if (!StringUtils.hasText(challenge.getDockerImage())) {
@@ -258,7 +313,25 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
       }
     }
 
+    // 验证动态积分配置
+    if ("DYNAMIC".equals(challenge.getScoringType())) {
+      if (challenge.getMaxPoints() == null || challenge.getMinPoints() == null) {
+        throw new BusinessException(400, "动态积分题目必须设置 maxPoints 和 minPoints");
+      }
+      if (challenge.getMaxPoints() <= challenge.getMinPoints()) {
+        throw new BusinessException(400, "maxPoints 必须大于 minPoints");
+      }
+    }
+
     challengeMapper.updateById(challenge);
+
+    // 如果练习题的分值发生变化，重新计算用户积分
+    Integer newPoints = challenge.getPoints();
+    if (Boolean.TRUE.equals(challenge.getEnabled())
+        && !Objects.equals(oldPoints, newPoints)
+        && newPoints != null) {
+      recalculatePracticeModeScores(challengeId, oldPoints, newPoints);
+    }
 
     User admin = getCurrentUser();
     log.info("管理员 {} 更新了题目: {}", admin.getUsername(), challenge.getTitle());
@@ -291,6 +364,16 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
     Challenge challenge = challengeMapper.selectById(challengeId);
     if (challenge == null) {
       throw new BusinessException(404, "题目不存在");
+    }
+
+    // 验证: 启用 DYNAMIC 计分类型的题目时，必须设置静态积分值
+    if (Boolean.TRUE.equals(request.getEnabled())) {
+      if ("DYNAMIC".equals(challenge.getScoringType())) {
+        if (challenge.getPoints() == null || challenge.getPoints() <= 0) {
+          throw new BusinessException(400,
+              "动态积分题目启用为练习题前，必须设置静态积分值 (points 字段)");
+        }
+      }
     }
 
     challenge.setEnabled(request.getEnabled());
@@ -552,6 +635,60 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
     }
   }
 
+  /**
+   * 重新计算练习模式下某题目的用户积分
+   *
+   * 当题目分值变化时，需要更新所有解决过该题目的用户的积分。
+   * 首杀奖励会根据新的基础分重新计算。
+   *
+   * @param challengeId 题目 ID
+   * @param oldPoints 旧分值
+   * @param newPoints 新分值
+   */
+  private void recalculatePracticeModeScores(Long challengeId, Integer oldPoints, int newPoints) {
+    List<Submission> submissions = submissionMapper.getPracticeSubmissionsForChallenge(challengeId);
+
+    if (submissions.isEmpty()) {
+      log.debug("练习模式题目 {} 暂无正确提交，无需重新计算积分", challengeId);
+      return;
+    }
+
+    int updatedCount = 0;
+    for (Submission submission : submissions) {
+      // 保留原有的首杀排名（first_blood_rank）
+      Integer preservedRank = submission.getFirstBloodRank();
+
+      // 计算旧的总积分
+      int oldBasePoints = submission.getPointsAwarded() != null ? submission.getPointsAwarded() : 0;
+      int oldBonus = submission.getFirstBloodBonus() != null ? submission.getFirstBloodBonus() : 0;
+      int oldTotal = oldBasePoints + oldBonus;
+
+      // 根据保留的排名计算新奖励（奖励随基础分变化）
+      int newBonus = 0;
+      if (preservedRank != null && preservedRank >= 1 && preservedRank <= 3) {
+        newBonus = dynamicScoringService.calculateFirstBloodBonus(newPoints, preservedRank);
+      }
+
+      int newTotal = newPoints + newBonus;
+      int pointsDiff = newTotal - oldTotal;
+
+      // 更新提交记录：保持原有 rank，更新基础分和奖励
+      submissionMapper.updatePointsAwarded(submission.getId(), newPoints, preservedRank, newBonus);
+
+      // 更新用户积分（只更新差值）
+      if (pointsDiff != 0 && submission.getUserId() != null) {
+        userMapper.addUserScore(submission.getUserId(), pointsDiff);
+        updatedCount++;
+      }
+
+      log.debug("更新练习提交 {}: rank={}, basePoints={}, bonus={}, diff={}",
+          submission.getId(), preservedRank, newPoints, newBonus, pointsDiff);
+    }
+
+    log.info("练习模式题目 {} 分值从 {} 更新为 {}，已更新 {} 个用户的积分",
+        challengeId, oldPoints, newPoints, updatedCount);
+  }
+
   private AdminChallengeListItemResponse toAdminChallengeListItemResponse(Challenge challenge) {
     Integer solves = submissionMapper.countSolvesByChallengeId(challenge.getId());
 
@@ -562,6 +699,7 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
         .category(challenge.getCategory())
         .difficulty(challenge.getDifficulty())
         .points(challenge.getPoints())
+        .scoringType(challenge.getScoringType())
         .author(challenge.getAuthor())
         .isDynamic(challenge.getIsDynamic())
         .enabled(challenge.getEnabled())
@@ -588,6 +726,10 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
         .category(challenge.getCategory())
         .difficulty(challenge.getDifficulty())
         .points(challenge.getPoints())
+        .scoringType(challenge.getScoringType())
+        .maxPoints(challenge.getMaxPoints())
+        .minPoints(challenge.getMinPoints())
+        .decay(challenge.getDecay())
         .author(challenge.getAuthor())
         .flag(challenge.getFlag())
         .isDynamic(challenge.getIsDynamic())

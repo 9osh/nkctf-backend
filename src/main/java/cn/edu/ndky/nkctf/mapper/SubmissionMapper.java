@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 import java.util.Map;
@@ -63,22 +64,29 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
   Integer countSolvesByChallengeId(@Param("challengeId") Long challengeId);
 
   /**
-   * 检查用户是否已解决某题目
+   * 检查用户是否已在练习模式解决某题目
+   * 注意：只检查 competition_id IS NULL 的记录，不包含竞赛提交
    */
   @Select("""
       SELECT COUNT(*) > 0
       FROM submission
-      WHERE user_id = #{userId} AND challenge_id = #{challengeId} AND is_correct = true
+      WHERE user_id = #{userId}
+        AND challenge_id = #{challengeId}
+        AND is_correct = true
+        AND competition_id IS NULL
       """)
   Boolean hasUserSolved(@Param("userId") Long userId, @Param("challengeId") Long challengeId);
 
   /**
-   * 获取用户已解决的题目 ID 列表
+   * 获取用户在练习模式已解决的题目 ID 列表
+   * 注意：只返回 competition_id IS NULL 的记录，不包含竞赛提交
    */
   @Select("""
       SELECT DISTINCT challenge_id
       FROM submission
-      WHERE user_id = #{userId} AND is_correct = true
+      WHERE user_id = #{userId}
+        AND is_correct = true
+        AND competition_id IS NULL
       """)
   List<Long> getSolvedChallengeIds(@Param("userId") Long userId);
 
@@ -169,4 +177,61 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
   List<Long> getUserSolvedChallengeIdsInCompetition(
       @Param("competitionId") Long competitionId,
       @Param("userId") Long userId);
+
+  /**
+   * 获取竞赛中某题目的所有正确提交记录
+   * 用于动态积分重新计算（无需排序，因为 first_blood_rank 已存储在数据库中）
+   */
+  @Select("""
+      SELECT *
+      FROM submission
+      WHERE competition_id = #{competitionId}
+        AND challenge_id = #{challengeId}
+        AND is_correct = true
+      """)
+  List<Submission> getCorrectSubmissionsForChallenge(
+      @Param("competitionId") Long competitionId,
+      @Param("challengeId") Long challengeId);
+
+  /**
+   * 更新提交记录的积分（动态积分重新计算时使用）
+   */
+  @Update("""
+      UPDATE submission
+      SET points_awarded = #{pointsAwarded},
+          first_blood_rank = #{firstBloodRank},
+          first_blood_bonus = #{firstBloodBonus}
+      WHERE id = #{submissionId}
+      """)
+  void updatePointsAwarded(
+      @Param("submissionId") Long submissionId,
+      @Param("pointsAwarded") Integer pointsAwarded,
+      @Param("firstBloodRank") Integer firstBloodRank,
+      @Param("firstBloodBonus") Integer firstBloodBonus);
+
+  /**
+   * 获取练习模式下某题目的下一个解题排名
+   * 用于计算首次解题（一血）奖励
+   */
+  @Select("""
+      SELECT COUNT(DISTINCT user_id) + 1
+      FROM submission
+      WHERE challenge_id = #{challengeId}
+        AND is_correct = true
+        AND competition_id IS NULL
+      """)
+  Integer getNextPracticeSolveRank(@Param("challengeId") Long challengeId);
+
+  /**
+   * 获取练习模式下某题目的所有正确提交记录
+   * 用于题目分值变更时重新计算用户积分
+   */
+  @Select("""
+      SELECT *
+      FROM submission
+      WHERE challenge_id = #{challengeId}
+        AND is_correct = true
+        AND competition_id IS NULL
+      """)
+  List<Submission> getPracticeSubmissionsForChallenge(@Param("challengeId") Long challengeId);
 }
