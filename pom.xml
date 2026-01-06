@@ -81,6 +81,13 @@
             <artifactId>docker-java-core</artifactId>
             <version>${docker-java.version}</version>
         </dependency>
+        <!-- zerodep transport: 内置 Unix socket 支持，无需额外依赖 -->
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java-transport-zerodep</artifactId>
+            <version>${docker-java.version}</version>
+        </dependency>
+        <!-- httpclient5 transport: 备用，支持更复杂的 HTTP 配置 -->
         <dependency>
             <groupId>com.github.docker-java</groupId>
             <artifactId>docker-java-transport-httpclient5</artifactId>

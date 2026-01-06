@@ -23,13 +23,13 @@ public interface RefreshTokenMapper extends BaseMapper<RefreshToken> {
   int revokeAllByUserId(@Param("userId") Long userId);
 
   /**
-   * 撤销指定的 Refresh Token
+   * 撤销指定的 Refresh Token (通过哈希值)
    */
   @Update("""
       UPDATE refresh_token SET revoked = TRUE
-      WHERE token = #{token} AND revoked = FALSE
+      WHERE token_hash = #{tokenHash} AND revoked = FALSE
       """)
-  int revokeByToken(@Param("token") String token);
+  int revokeByTokenHash(@Param("tokenHash") String tokenHash);
 
   /**
    * 删除已过期或已撤销的 Refresh Token

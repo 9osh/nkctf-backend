@@ -70,23 +70,62 @@ jwt:
   header: Authorization
   prefix: Bearer
 
+# Refresh Token Cookie 配置
+cookie:
+  refresh-token:
+    name: nkctf_refresh_token
+    path: /api/auth              # 仅发送到认证端点
+    max-age: 604800              # 7天 (秒)
+    http-only: true              # JS 不可访问
+    secure: false                # 开发环境设为 false，生产环境应设为 true
+    same-site: Lax               # 跨子域名需要使用 Lax
+    domain: ""                   # 留空则为当前域名，生产环境设为 .nkctf.cn
+
 # Docker 配置
+# 支持多种连接方式：
+#   - Unix socket: unix:///var/run/docker.sock (推荐，最安全)
+#   - TCP with TLS: tcp://localhost:2376 (生产环境)
+#   - TCP: tcp://localhost:2375 (仅开发环境，无加密)
+#
+# 连接优先级：
+#   1. 环境变量 DOCKER_HOST
+#   2. 配置项 docker.host
+#   3. 自动检测 (当 auto-detect: true)
 docker:
-  host: unix:///var/run/docker.sock
+  host: ""                        # 留空启用自动检测，或显式指定：
+                                  # unix:///var/run/docker.sock
+                                  # tcp://localhost:2375
+                                  # tcp://localhost:2376
+  auto-detect: true               # 自动检测可用的 Docker 端点
+  connection-timeout: 30          # 连接超时（秒）
+  response-timeout: 45            # 响应超时（秒）
+  max-connections: 100            # 最大连接数
+
+  # TLS 配置（用于 tcp://localhost:2376）
+  tls:
+    enabled: false                # 是否启用 TLS
+    verify: true                  # 是否验证服务器证书
+    cert-path: ""                 # 证书目录（包含 ca.pem, cert.pem, key.pem）
+
+  # 镜像仓库配置
   registry:
     url: ""
     username: ""
     password: ""
+
+  # 容器配置
   container:
     network: nkctf-challenge-network
     memory-limit: 256m
     cpu-limit: 0.5
-    timeout: 3600  # 容器最大存活时间(秒)
-    host: localhost  # 返回给用户的访问地址
+    timeout: 3600                 # 容器最大存活时间(秒)
+    host: localhost               # 返回给用户的访问地址
+
+  # 资源限制
   limits:
-    user-max-containers: 1    # 普通用户最大容器数
-    team-max-containers: 3    # 团队最大容器数
-    max-extend-count: 3       # 每个容器最大延时次数
+    user-max-containers: 1        # 普通用户最大容器数
+    team-max-containers: 3        # 团队最大容器数
+    max-extend-count: 3           # 每个容器最大延时次数
 
 # SpringDoc OpenAPI 配置
 springdoc:

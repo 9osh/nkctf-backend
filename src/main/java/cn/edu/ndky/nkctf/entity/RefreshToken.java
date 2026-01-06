@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 
 /**
  * Refresh Token 实体
+ * 注意：数据库中存储的是 Token 的 SHA-256 哈希值，而非明文
  */
 @Data
 @TableName("refresh_token")
@@ -16,9 +17,10 @@ public class RefreshToken {
   private Long id;
 
   /**
-   * Token 值 (高熵随机 UUID)
+   * Token 哈希值 (SHA-256, 64 字符十六进制)
+   * 数据库中不存储明文 Token，提高安全性
    */
-  private String token;
+  private String tokenHash;
 
   /**
    * 关联用户 ID

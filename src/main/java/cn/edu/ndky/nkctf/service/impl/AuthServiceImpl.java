@@ -11,6 +11,7 @@ import cn.edu.ndky.nkctf.mapper.RefreshTokenMapper;
 import cn.edu.ndky.nkctf.mapper.UserMapper;
 import cn.edu.ndky.nkctf.service.AuthService;
 import cn.edu.ndky.nkctf.util.JwtUtil;
+import cn.edu.ndky.nkctf.util.TokenHashUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -96,9 +97,12 @@ public class AuthServiceImpl implements AuthService {
     // 生成 Refresh Token (高熵随机值, 7天)
     String refreshTokenValue = generateRefreshToken();
 
-    // 保存 Refresh Token 到数据库
+    // 计算 Token 哈希值用于数据库存储
+    String tokenHash = TokenHashUtil.hashToken(refreshTokenValue);
+
+    // 保存 Token 哈希值到数据库 (不存储明文)
     RefreshToken refreshToken = new RefreshToken();
-    refreshToken.setToken(refreshTokenValue);
+    refreshToken.setTokenHash(tokenHash);
     refreshToken.setUserId(user.getId());
     refreshToken.setUserAgent(truncateUserAgent(userAgent));
     refreshToken.setIpAddress(ipAddress);
@@ -111,7 +115,7 @@ public class AuthServiceImpl implements AuthService {
 
     return LoginResponse.builder()
         .accessToken(accessToken)
-        .refreshToken(refreshTokenValue)
+        .refreshToken(refreshTokenValue) // 返回明文给客户端，通过 Cookie 传输
         .expiresIn(jwtUtil.getAccessTokenExpiration() / 1000) // 转换为秒
         .userId(user.getId())
         .username(user.getUsername())
@@ -231,10 +235,13 @@ public class AuthServiceImpl implements AuthService {
   @Transactional
   public TokenRefreshResponse refreshToken(String refreshTokenValue, String userAgent,
       String ipAddress) {
-    // 查询 Refresh Token
+    // 计算传入 Token 的哈希值用于查询
+    String tokenHash = TokenHashUtil.hashToken(refreshTokenValue);
+
+    // 根据哈希值查询 Refresh Token
     RefreshToken refreshToken = refreshTokenMapper.selectOne(
         new LambdaQueryWrapper<RefreshToken>()
-            .eq(RefreshToken::getToken, refreshTokenValue)
+            .eq(RefreshToken::getTokenHash, tokenHash)
     );
 
     // Token 不存在
@@ -265,15 +272,17 @@ public class AuthServiceImpl implements AuthService {
     }
 
     // Token 轮转：撤销旧 Token
-    refreshTokenMapper.revokeByToken(refreshTokenValue);
+    refreshTokenMapper.revokeByTokenHash(tokenHash);
 
     // 生成新的 Access Token
     String newAccessToken = jwtUtil.generateToken(user.getId(), user.getUsername());
 
     // 生成新的 Refresh Token
     String newRefreshTokenValue = generateRefreshToken();
+    String newTokenHash = TokenHashUtil.hashToken(newRefreshTokenValue);
+
     RefreshToken newRefreshToken = new RefreshToken();
-    newRefreshToken.setToken(newRefreshTokenValue);
+    newRefreshToken.setTokenHash(newTokenHash);
     newRefreshToken.setUserId(user.getId());
     newRefreshToken.setUserAgent(truncateUserAgent(userAgent));
     newRefreshToken.setIpAddress(ipAddress);
@@ -286,7 +295,7 @@ public class AuthServiceImpl implements AuthService {
 
     return TokenRefreshResponse.builder()
         .accessToken(newAccessToken)
-        .refreshToken(newRefreshTokenValue)
+        .refreshToken(newRefreshTokenValue) // 返回明文，通过 Cookie 传输
         .expiresIn(jwtUtil.getAccessTokenExpiration() / 1000)
         .userId(user.getId())
         .username(user.getUsername())
@@ -316,9 +325,10 @@ public class AuthServiceImpl implements AuthService {
       }
     }
 
-    // 撤销 Refresh Token
+    // 撤销 Refresh Token (通过哈希值)
     if (StringUtils.hasText(refreshToken)) {
-      int count = refreshTokenMapper.revokeByToken(refreshToken);
+      String tokenHash = TokenHashUtil.hashToken(refreshToken);
+      int count = refreshTokenMapper.revokeByTokenHash(tokenHash);
       if (count > 0) {
         log.info("Refresh Token 已撤销");
       }

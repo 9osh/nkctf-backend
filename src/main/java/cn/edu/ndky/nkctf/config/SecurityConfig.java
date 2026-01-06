@@ -79,9 +79,19 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("*"));
+        // 显式指定允许的源 (不能使用通配符 "*" 与 credentials 一起使用)
+        // 生产环境应配置为实际域名
+        configuration.setAllowedOrigins(Arrays.asList(
+                "http://localhost:3000",     // Nuxt 开发环境
+                "http://localhost:5173",     // Vite 开发环境
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:5173",
+                "https://www.nkctf.cn",      // 生产前端
+                "https://nkctf.cn"           // 生产前端备用
+        ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
+        // 允许发送 Cookie (跨域 Cookie 必须设为 true)
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 
