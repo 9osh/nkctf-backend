@@ -44,7 +44,8 @@ public class SecurityConfig {
             "/v3/api-docs/**",
             "/actuator/health",
             "/articles/published/**",
-            "/articles/tags"
+            "/articles/tags",
+            "/ws/**"  // WebSocket endpoint
     };
 
     @Bean

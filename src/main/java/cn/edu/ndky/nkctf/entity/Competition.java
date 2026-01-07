@@ -45,6 +45,16 @@ public class Competition {
    */
   private LocalDateTime endTime;
 
+  /**
+   * 状态更新时间（由调度器或管理员更新）
+   */
+  private LocalDateTime statusUpdatedAt;
+
+  /**
+   * 状态覆盖（管理员手动设置，NULL 表示使用计算值）
+   */
+  private String statusOverride;
+
   @TableLogic
   private Integer deleted;
 

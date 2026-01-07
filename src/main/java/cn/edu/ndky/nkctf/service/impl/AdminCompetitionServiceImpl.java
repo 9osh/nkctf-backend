@@ -138,6 +138,9 @@ public class AdminCompetitionServiceImpl implements AdminCompetitionService {
       throw new BusinessException(404, "竞赛不存在");
     }
 
+    // Defensive: Preserve the status override value across the update.
+    String existingStatusOverride = competition.getStatusOverride();
+
     // 更新名称
     if (StringUtils.hasText(request.getName())) {
       // 检查名称唯一性
@@ -177,6 +180,9 @@ public class AdminCompetitionServiceImpl implements AdminCompetitionService {
     if (competition.getStartTime().isAfter(competition.getEndTime())) {
       throw new BusinessException(400, "开始时间不能晚于结束时间");
     }
+
+    // Restore the override value to prevent accidental clearing by updateById.
+    competition.setStatusOverride(existingStatusOverride);
 
     competitionMapper.updateById(competition);
 
@@ -230,11 +236,14 @@ public class AdminCompetitionServiceImpl implements AdminCompetitionService {
       throw new BusinessException(400, "无效的状态: " + request.getStatus());
     }
 
+    // 手动更改状态时，同时设置 status_override 以防止调度器覆盖
+    // This ensures the scheduler won't overwrite manual status changes
     competition.setStatus(newStatus);
+    competition.setStatusOverride(newStatus);
     competitionMapper.updateById(competition);
 
     User admin = getCurrentUser();
-    log.info("管理员 {} 将竞赛 {} 的状态更改为 {}",
+    log.info("管理员 {} 将竞赛 {} 的状态更改为 {} (已设置状态覆盖)",
         admin.getUsername(), competition.getName(), newStatus);
   }
 

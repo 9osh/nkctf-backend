@@ -3,7 +3,9 @@ package cn.edu.ndky.nkctf.controller;
 import cn.edu.ndky.nkctf.dto.Result;
 import cn.edu.ndky.nkctf.dto.request.*;
 import cn.edu.ndky.nkctf.dto.response.*;
+import cn.edu.ndky.nkctf.entity.Competition;
 import cn.edu.ndky.nkctf.service.AdminCompetitionService;
+import cn.edu.ndky.nkctf.service.CompetitionStatusService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -25,6 +27,7 @@ import java.util.List;
 public class AdminCompetitionController {
 
   private final AdminCompetitionService adminCompetitionService;
+  private final CompetitionStatusService competitionStatusService;
 
   // ========== 竞赛 CRUD ==========
 
@@ -129,5 +132,27 @@ public class AdminCompetitionController {
     request.setKeyword(keyword);
     request.setPage(page);
     return Result.success(adminCompetitionService.getParticipants(id, request));
+  }
+
+  // ========== 状态覆盖 ==========
+
+  @Operation(summary = "设置状态覆盖",
+      description = "手动覆盖竞赛状态，覆盖后状态不再根据时间自动计算")
+  @PutMapping("/{id}/status-override")
+  public Result<Void> setStatusOverride(
+      @Parameter(description = "竞赛 ID") @PathVariable Long id,
+      @Valid @RequestBody StatusOverrideRequest request) {
+    Competition.Status status = Competition.Status.valueOf(request.getStatus().toUpperCase());
+    competitionStatusService.setStatusOverride(id, status);
+    return Result.success("状态覆盖设置成功", null);
+  }
+
+  @Operation(summary = "清除状态覆盖",
+      description = "清除手动覆盖的状态，恢复为根据时间自动计算")
+  @DeleteMapping("/{id}/status-override")
+  public Result<Void> clearStatusOverride(
+      @Parameter(description = "竞赛 ID") @PathVariable Long id) {
+    competitionStatusService.clearStatusOverride(id);
+    return Result.success("状态覆盖已清除", null);
   }
 }

@@ -10,6 +10,7 @@ import cn.edu.ndky.nkctf.entity.*;
 import cn.edu.ndky.nkctf.exception.BusinessException;
 import cn.edu.ndky.nkctf.mapper.*;
 import cn.edu.ndky.nkctf.service.CompetitionService;
+import cn.edu.ndky.nkctf.service.CompetitionStatusService;
 import cn.edu.ndky.nkctf.service.DynamicScoringService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -80,6 +81,7 @@ public class CompetitionServiceImpl implements CompetitionService {
   private final TeamMapper teamMapper;
   private final StringRedisTemplate stringRedisTemplate;
   private final DynamicScoringService dynamicScoringService;
+  private final CompetitionStatusService competitionStatusService;
 
   private static final String DYNAMIC_FLAG_KEY_PREFIX = "nkctf:flag:";
   private static final String CONTAINER_CHALLENGE_USER_PREFIX = "nkctf:container:challenge:";
@@ -120,7 +122,7 @@ public class CompetitionServiceImpl implements CompetitionService {
         .name(competition.getName())
         .description(competition.getDescription())
         .isTeamCompetition(competition.getIsTeamCompetition())
-        .status(competition.getStatus())
+        .status(competitionStatusService.getEffectiveStatus(competition).getValue())
         .startTime(formatDateTime(competition.getStartTime()))
         .endTime(formatDateTime(competition.getEndTime()))
         .participantCount(getParticipantCount(competition))
@@ -361,11 +363,10 @@ public class CompetitionServiceImpl implements CompetitionService {
 
   /**
    * 检查竞赛是否可查看（active 或 ending）
+   * 使用实时计算的状态，而非数据库中的持久化状态
    */
   private boolean isCompetitionViewable(Competition competition) {
-    String status = competition.getStatus();
-    return Competition.Status.ACTIVE.getValue().equals(status)
-        || Competition.Status.ENDING.getValue().equals(status);
+    return competitionStatusService.isCompetitionViewable(competition);
   }
 
   /**
@@ -383,6 +384,7 @@ public class CompetitionServiceImpl implements CompetitionService {
 
   /**
    * 构建竞赛列表项
+   * 使用实时计算的状态
    */
   private CompetitionListItemResponse buildCompetitionListItem(Competition comp, User user) {
     return CompetitionListItemResponse.builder()
@@ -390,7 +392,7 @@ public class CompetitionServiceImpl implements CompetitionService {
         .name(comp.getName())
         .description(comp.getDescription())
         .isTeamCompetition(comp.getIsTeamCompetition())
-        .status(comp.getStatus())
+        .status(competitionStatusService.getEffectiveStatus(comp).getValue())
         .startTime(formatDateTime(comp.getStartTime()))
         .endTime(formatDateTime(comp.getEndTime()))
         .participantCount(getParticipantCount(comp))
@@ -759,7 +761,8 @@ public class CompetitionServiceImpl implements CompetitionService {
       boolean isCorrect = correctFlag != null && correctFlag.equals(submittedFlag);
 
       // 判断是否计分（只有 active 状态且首次正确提交才计分）
-      boolean isActive = Competition.Status.ACTIVE.getValue().equals(competition.getStatus());
+      // 使用实时计算的状态，确保准确性
+      boolean isActive = competitionStatusService.isCompetitionScorable(competition);
       boolean shouldScore = isCorrect && isActive && !alreadySolved;
 
       // ========== 创建提交记录 ==========
