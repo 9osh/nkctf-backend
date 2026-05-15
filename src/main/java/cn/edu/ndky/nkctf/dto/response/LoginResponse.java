@@ -26,6 +26,7 @@ public class LoginResponse {
    * Refresh Token (内部使用，不会序列化到响应)
    * @deprecated 仅用于内部传递给 Controller 设置 Cookie，响应体中不包含此字段
    */
+  @Deprecated
   private String refreshToken;
 
   /**

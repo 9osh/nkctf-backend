@@ -1,0 +1,38 @@
+# Integration test profile — no Docker / PostgreSQL / Redis required
+spring:
+  datasource:
+    url: jdbc:h2:mem:nkctf;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  session:
+    store-type: none
+
+  task:
+    scheduling:
+      enabled: false
+
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisReactiveAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisRepositoriesAutoConfiguration
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+docker:
+  auto-detect: false
+  host: ""
+
+logging:
+  level:
+    root: WARN
+    cn.edu.ndky.nkctf: INFO

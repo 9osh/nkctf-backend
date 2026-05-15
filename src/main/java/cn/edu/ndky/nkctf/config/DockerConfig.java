@@ -17,6 +17,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.context.event.EventListener;
 import org.springframework.util.StringUtils;
 
@@ -55,6 +56,7 @@ import java.util.List;
  */
 @Slf4j
 @Configuration
+@Profile("!test")
 @RequiredArgsConstructor
 @EnableConfigurationProperties(DockerProperties.class)
 public class DockerConfig {
