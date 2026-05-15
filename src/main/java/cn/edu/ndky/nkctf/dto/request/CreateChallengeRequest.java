@@ -1,5 +1,6 @@
 package cn.edu.ndky.nkctf.dto.request;
 
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -48,6 +49,13 @@ public class CreateChallengeRequest {
    * Docker 镜像名（isDynamic=true 时必填）
    */
   private String dockerImage;
+
+  /**
+   * 容器内服务端口（如 80、8080、3000）；未填则使用平台默认端口
+   */
+  @Min(value = 1, message = "容器端口最小为 1")
+  @Max(value = 65535, message = "容器端口最大为 65535")
+  private Integer dockerPort;
 
   /**
    * 是否启用（默认 false）

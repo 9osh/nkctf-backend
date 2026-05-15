@@ -71,8 +71,8 @@ application-local.yaml
 application-local.properties
 application-dev.yml
 application-dev.yaml
-application-prod.yml
 application-prod.yaml
+#application-prod.yml
 
 # Environment files
 .env

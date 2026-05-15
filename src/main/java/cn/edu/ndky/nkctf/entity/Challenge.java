@@ -65,6 +65,11 @@ public class Challenge {
   private String dockerImage;
 
   /**
+   * 动态容器对外服务端口；为空时使用平台配置 {@code docker.container.container-port}
+   */
+  private Integer dockerPort;
+
+  /**
    * 附件下载链接
    */
   private String attachmentUrl;

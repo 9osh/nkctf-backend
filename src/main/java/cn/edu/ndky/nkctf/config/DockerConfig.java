@@ -90,8 +90,9 @@ public class DockerConfig {
     // 4. 创建 Docker 客户端
     dockerClient = DockerClientImpl.getInstance(config, httpClient);
 
-    // 5. 验证连接
+    // 5. 验证连接与安全策略
     verifyConnection(resolved);
+    enforceConnectionSecurity(resolved);
 
     log.info("========== Docker 客户端初始化完成 ==========");
     return dockerClient;
@@ -146,6 +147,20 @@ public class DockerConfig {
     }
 
     return builder.build();
+  }
+
+  /**
+   * 生产环境禁止明文 TCP Docker API（2375）
+   */
+  private void enforceConnectionSecurity(ResolvedDockerHost resolved) {
+    if (!properties.getSecurity().isForbidPlainTcp()) {
+      return;
+    }
+    if (resolved.isTcp() && !resolved.tlsEnabled()) {
+      throw new DockerHostResolver.DockerHostResolutionException(
+          "已启用 docker.security.forbid-plain-tcp：不得使用未加密的 TCP Docker API。"
+              + "请使用 unix:///var/run/docker.sock 或配置 TLS（tcp://host:2376）。");
+    }
   }
 
   /**

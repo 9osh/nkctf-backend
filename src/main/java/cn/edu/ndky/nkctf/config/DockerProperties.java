@@ -76,6 +76,11 @@ public class DockerProperties {
    */
   private Limits limits = new Limits();
 
+  /**
+   * 连接与端口发布安全策略
+   */
+  private Security security = new Security();
+
   @Data
   public static class Tls {
     /**
@@ -120,6 +125,49 @@ public class DockerProperties {
      * 返回给用户的访问地址
      */
     private String host = "localhost";
+
+    /**
+     * 挑战镜像对外提供服务的容器端口（如 Web 题为 80）
+     */
+    private int containerPort = 80;
+
+    /**
+     * 宿主机绑定地址；0 表示随机宿主机端口。开发建议 127.0.0.1，生产可为 0.0.0.0
+     */
+    private String bindHost = "127.0.0.1";
+
+    /**
+     * 是否发布全部 EXPOSE 端口（仅限调试，生产必须为 false）
+     */
+    private boolean publishAllPorts = false;
+
+    /**
+     * 进程数上限
+     */
+    private long pidsLimit = 128;
+
+    /**
+     * 丢弃全部 Linux capabilities
+     */
+    private boolean dropAllCapabilities = true;
+
+    /**
+     * 禁止提权（no-new-privileges）
+     */
+    private boolean noNewPrivileges = true;
+
+    /**
+     * 只读根文件系统（部分镜像不兼容，默认关闭）
+     */
+    private boolean readonlyRootfs = false;
+  }
+
+  @Data
+  public static class Security {
+    /**
+     * 禁止连接未加密的 Docker TCP（tcp://*:2375）
+     */
+    private boolean forbidPlainTcp = false;
   }
 
   @Data

@@ -1,5 +1,6 @@
 package cn.edu.ndky.nkctf.service.impl;
 
+import cn.edu.ndky.nkctf.config.ChallengeContainerHostConfigBuilder;
 import cn.edu.ndky.nkctf.dto.request.*;
 import cn.edu.ndky.nkctf.dto.response.*;
 import cn.edu.ndky.nkctf.entity.Challenge;
@@ -155,6 +156,7 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
       if (!StringUtils.hasText(request.getDockerImage())) {
         throw new BusinessException(400, "动态题目必须指定 Docker 镜像");
       }
+      validateDockerPort(request.getDockerPort());
     } else {
       if (!StringUtils.hasText(request.getFlag())) {
         throw new BusinessException(400, "静态题目必须指定 Flag");
@@ -197,6 +199,7 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
     challenge.setFlag(request.getFlag());
     challenge.setIsDynamic(isDynamic);
     challenge.setDockerImage(request.getDockerImage());
+    challenge.setDockerPort(request.getDockerPort());
     challenge.setEnabled(request.getEnabled() != null ? request.getEnabled() : false);
 
     challengeMapper.insert(challenge);
@@ -277,6 +280,11 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
       challenge.setDockerImage(request.getDockerImage());
     }
 
+    if (request.getDockerPort() != null) {
+      validateDockerPort(request.getDockerPort());
+      challenge.setDockerPort(request.getDockerPort());
+    }
+
     // 更新启用状态
     if (request.getEnabled() != null) {
       challenge.setEnabled(request.getEnabled());
@@ -307,6 +315,7 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
       if (!StringUtils.hasText(challenge.getDockerImage())) {
         throw new BusinessException(400, "动态题目必须指定 Docker 镜像");
       }
+      validateDockerPort(challenge.getDockerPort());
     } else {
       if (!StringUtils.hasText(challenge.getFlag())) {
         throw new BusinessException(400, "静态题目必须指定 Flag");
@@ -734,6 +743,7 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
         .flag(challenge.getFlag())
         .isDynamic(challenge.getIsDynamic())
         .dockerImage(challenge.getDockerImage())
+        .dockerPort(challenge.getDockerPort())
         .attachmentUrl(challenge.getAttachmentUrl())
         .attachmentName(challenge.getAttachmentName())
         .enabled(challenge.getEnabled())
@@ -744,6 +754,15 @@ public class AdminChallengeServiceImpl implements AdminChallengeService {
         .updateTime(challenge.getUpdateTime() != null ?
             challenge.getUpdateTime().format(DATE_FORMATTER) : null)
         .build();
+  }
+
+  private void validateDockerPort(Integer dockerPort) {
+    if (dockerPort == null) {
+      return;
+    }
+    if (!ChallengeContainerHostConfigBuilder.isValidPort(dockerPort)) {
+      throw new BusinessException(400, "容器端口必须在 1-65535 之间");
+    }
   }
 
   private AdminHintResponse toAdminHintResponse(Hint hint) {

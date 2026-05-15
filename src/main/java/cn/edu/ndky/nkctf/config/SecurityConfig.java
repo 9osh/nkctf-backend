@@ -2,6 +2,7 @@ package cn.edu.ndky.nkctf.config;
 
 import cn.edu.ndky.nkctf.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -17,6 +18,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -31,22 +33,35 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
-    /**
-     * 白名单路径
-     */
-    private static final String[] WHITE_LIST = {
+    @Value("${springdoc.swagger-ui.enabled:true}")
+    private boolean swaggerUiEnabled;
+
+    private static final String[] PUBLIC_PATHS = {
             "/auth/login",
             "/auth/register",
             "/auth/refresh",
             "/auth/captcha",
             "/attachments/download",
-            "/swagger-ui/**",
-            "/v3/api-docs/**",
             "/actuator/health",
             "/articles/published/**",
             "/articles/tags",
-            "/ws/**"  // WebSocket endpoint
+            "/ws/**"
     };
+
+    private static final String[] SWAGGER_PATHS = {
+            "/swagger-ui/**",
+            "/v3/api-docs/**"
+    };
+
+    private String[] permitAllPaths() {
+        if (!swaggerUiEnabled) {
+            return PUBLIC_PATHS;
+        }
+        var paths = new ArrayList<String>(PUBLIC_PATHS.length + SWAGGER_PATHS.length);
+        paths.addAll(Arrays.asList(PUBLIC_PATHS));
+        paths.addAll(Arrays.asList(SWAGGER_PATHS));
+        return paths.toArray(String[]::new);
+    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -63,7 +78,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // 配置路径权限
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(WHITE_LIST).permitAll()
+                        .requestMatchers(permitAllPaths()).permitAll()
                         .anyRequest().authenticated()
                 )
                 // 添加 JWT 过滤器

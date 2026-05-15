@@ -62,6 +62,11 @@ public class AdminChallengeDetailResponse {
 
   private String dockerImage;
 
+  /**
+   * 容器内服务端口；null 表示使用平台默认
+   */
+  private Integer dockerPort;
+
   private String attachmentUrl;
 
   private String attachmentName;

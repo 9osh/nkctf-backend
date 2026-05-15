@@ -28,6 +28,9 @@ mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
 
+jwt:
+  secret: nkctf-test-jwt-secret-integration-only-32b
+
 docker:
   auto-detect: false
   host: ""

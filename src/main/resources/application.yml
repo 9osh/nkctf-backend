@@ -7,11 +7,11 @@ spring:
   application:
     name: nkctf-platform
 
-  # 数据库配置
+  # 数据库配置（本地默认仅用于开发；生产见 application-prod.yml + NKCTF_DB_*）
   datasource:
-    url: jdbc:postgresql://localhost:5432/nkctf
-    username: nkctf
-    password: nkctf123456
+    url: ${NKCTF_DB_URL:jdbc:postgresql://localhost:5432/nkctf}
+    username: ${NKCTF_DB_USERNAME:nkctf}
+    password: ${NKCTF_DB_PASSWORD:nkctf123456}
     driver-class-name: org.postgresql.Driver
     hikari:
       minimum-idle: 5
@@ -21,12 +21,12 @@ spring:
       max-lifetime: 1800000
       connection-timeout: 30000
 
-  # Redis 配置
+  # Redis 配置（生产通过 NKCTF_REDIS_* 注入）
   data:
     redis:
-      host: localhost
-      port: 6379
-      password: nkctf123456
+      host: ${NKCTF_REDIS_HOST:localhost}
+      port: ${NKCTF_REDIS_PORT:6379}
+      password: ${NKCTF_REDIS_PASSWORD:nkctf123456}
       database: 0
       lettuce:
         pool:
@@ -62,9 +62,9 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
 
-# JWT 配置
+# JWT 配置（生产必须设置 NKCTF_JWT_SECRET，见 application-prod.yml）
 jwt:
-  secret: nkctf-secret-key-please-change-in-production-environment-2024
+  secret: ${NKCTF_JWT_SECRET:nkctf-dev-jwt-secret-local-only-32bytes-min!!}
   access-token-expiration: 900000    # 15分钟 (毫秒)
   refresh-token-expiration: 604800000  # 7天 (毫秒)
   header: Authorization
@@ -120,6 +120,17 @@ docker:
     cpu-limit: 0.5
     timeout: 3600                 # 容器最大存活时间(秒)
     host: localhost               # 返回给用户的访问地址
+    container-port: 80            # 题目未配置 docker_port 时的默认容器端口
+    bind-host: 127.0.0.1          # 宿主机绑定地址；0 为随机宿主机端口
+    publish-all-ports: false      # 禁止发布全部 EXPOSE 端口（仅绑定题目指定端口）
+    pids-limit: 256
+    drop-all-capabilities: false  # 部分 CTF 镜像依赖 capability，按题目在库中配置端口即可
+    no-new-privileges: true
+    readonly-rootfs: false
+
+  # Docker API 连接安全
+  security:
+    forbid-plain-tcp: false       # 生产在 application-prod.yml 中设为 true
 
   # 资源限制
   limits:

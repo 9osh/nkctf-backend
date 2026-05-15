@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS challenge (
     flag VARCHAR(255),
     is_dynamic BOOLEAN DEFAULT FALSE,
     docker_image VARCHAR(255),
+    docker_port INTEGER,
     attachment_url VARCHAR(500),
     attachment_name VARCHAR(255),
     enabled BOOLEAN DEFAULT TRUE,

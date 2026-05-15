@@ -16,8 +16,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import cn.edu.ndky.nkctf.config.ChallengeContainerHostConfigBuilder;
 import com.github.dockerjava.api.model.ExposedPort;
-import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.Ports;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -87,6 +87,7 @@ public class ContainerServiceImpl implements ContainerService {
   private static final String FIELD_EXTEND_COUNT = "extendCount";
 
   private final DockerClient dockerClient;
+  private final ChallengeContainerHostConfigBuilder challengeHostConfigBuilder;
   private final StringRedisTemplate redisTemplate;
   private final ChallengeMapper challengeMapper;
   private final CompetitionMapper competitionMapper;
@@ -94,17 +95,8 @@ public class ContainerServiceImpl implements ContainerService {
   private final CompetitionTeamMapper competitionTeamMapper;
   private final UserMapper userMapper;
 
-  @Value("${docker.container.memory-limit:256m}")
-  private String memoryLimit;
-
-  @Value("${docker.container.cpu-limit:0.5}")
-  private Double cpuLimit;
-
   @Value("${docker.container.timeout:3600}")
   private Integer containerTimeout;
-
-  @Value("${docker.container.network:nkctf-challenge-network}")
-  private String networkName;
 
   @Value("${docker.container.host:localhost}")
   private String containerHost;
@@ -134,6 +126,13 @@ public class ContainerServiceImpl implements ContainerService {
     if (challenge.getDockerImage() == null || challenge.getDockerImage().isBlank()) {
       throw new BusinessException(400, "该题目不支持动态容器");
     }
+
+    if (challenge.getDockerPort() != null
+        && !ChallengeContainerHostConfigBuilder.isValidPort(challenge.getDockerPort())) {
+      throw new BusinessException(400, "题目容器端口配置无效，须在 1-65535 之间");
+    }
+    final int containerPort =
+        challengeHostConfigBuilder.resolveContainerPort(challenge.getDockerPort());
 
     // ========== 验证竞赛参赛资格 ==========
     Competition competition = null;
@@ -205,17 +204,12 @@ public class ContainerServiceImpl implements ContainerService {
 
       // ========== 创建 Docker 容器 ==========
       String containerName = "nkctf-" + challengeId + "-" + userId + "-" + System.currentTimeMillis();
-      long memoryBytes = parseMemoryLimit(memoryLimit);
-      long cpuQuota = (long) (cpuLimit * 100000);
 
       CreateContainerResponse container = dockerClient.createContainerCmd(challenge.getDockerImage())
           .withName(containerName)
           .withEnv("FLAG=" + flag)
-          .withHostConfig(HostConfig.newHostConfig()
-              .withMemory(memoryBytes)
-              .withCpuQuota(cpuQuota)
-              .withNetworkMode(networkName)
-              .withPublishAllPorts(true))
+          .withExposedPorts(ExposedPort.tcp(containerPort))
+          .withHostConfig(challengeHostConfigBuilder.build(containerPort))
           .exec();
 
       String containerId = container.getId();
@@ -225,7 +219,7 @@ public class ContainerServiceImpl implements ContainerService {
 
       // 获取映射端口
       InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
-      Integer hostPort = extractHostPort(inspect);
+      Integer hostPort = extractHostPort(inspect, containerPort);
 
       // ========== 存储到 Redis ==========
       long now = System.currentTimeMillis();
@@ -517,40 +511,24 @@ public class ContainerServiceImpl implements ContainerService {
   }
 
   /**
-   * 解析内存限制配置
+   * 从容器检查结果中提取指定容器端口映射的宿主机端口
    */
-  private long parseMemoryLimit(String limit) {
-    limit = limit.toLowerCase().trim();
-    if (limit.endsWith("g")) {
-      return Long.parseLong(limit.replace("g", "")) * 1024 * 1024 * 1024;
-    } else if (limit.endsWith("m")) {
-      return Long.parseLong(limit.replace("m", "")) * 1024 * 1024;
-    } else if (limit.endsWith("k")) {
-      return Long.parseLong(limit.replace("k", "")) * 1024;
-    }
-    return Long.parseLong(limit);
-  }
-
-  /**
-   * 从容器检查结果中提取宿主机端口
-   */
-  private Integer extractHostPort(InspectContainerResponse inspect) {
+  private Integer extractHostPort(InspectContainerResponse inspect, int containerPort) {
     Ports ports = inspect.getNetworkSettings().getPorts();
     if (ports == null || ports.getBindings() == null) {
       return null;
     }
 
-    // 获取第一个映射的端口
-    for (Map.Entry<ExposedPort, Ports.Binding[]> entry : ports.getBindings().entrySet()) {
-      Ports.Binding[] bindings = entry.getValue();
-      if (bindings != null && bindings.length > 0) {
-        String hostPortSpec = bindings[0].getHostPortSpec();
-        if (hostPortSpec != null) {
-          return Integer.parseInt(hostPortSpec);
-        }
-      }
+    ExposedPort exposed = ExposedPort.tcp(containerPort);
+    Ports.Binding[] bindings = ports.getBindings().get(exposed);
+    if (bindings == null || bindings.length == 0) {
+      return null;
     }
-    return null;
+    String hostPortSpec = bindings[0].getHostPortSpec();
+    if (hostPortSpec == null || hostPortSpec.isEmpty()) {
+      return null;
+    }
+    return Integer.parseInt(hostPortSpec);
   }
 
   /**
