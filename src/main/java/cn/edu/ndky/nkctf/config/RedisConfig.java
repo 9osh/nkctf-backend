@@ -1,53 +1,49 @@
 package cn.edu.ndky.nkctf.config;
 
-import com.fasterxml.jackson.annotation.JsonAutoDetect;
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.annotation.PropertyAccessor;
+import cn.edu.ndky.nkctf.dto.response.LeaderboardResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 /**
- * Redis 配置
+ * Redis 序列化配置：不使用 {@code activateDefaultTyping}，由代码指定具体类型。
  *
- * <p>注意: GenericJackson2JsonRedisSerializer 在 Spring Data Redis 4.0 中已弃用,
- * 建议在迁移到 Jackson 3 后使用 GenericJacksonJsonRedisSerializer 替代。
+ * <ul>
+ *   <li>字符串、计数、黑名单等：使用 Spring 自带的 {@link org.springframework.data.redis.core.StringRedisTemplate}</li>
+ *   <li>排行榜缓存：{@link LeaderboardResponse} 专用 {@link RedisTemplate}</li>
+ * </ul>
  */
 @Configuration
 @Profile("!test")
 public class RedisConfig {
 
   @Bean
-  @SuppressWarnings("removal")
-  public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
-    RedisTemplate<String, Object> template = new RedisTemplate<>();
+  public ObjectMapper redisObjectMapper() {
+    ObjectMapper mapper = new ObjectMapper();
+    mapper.registerModule(new JavaTimeModule());
+    return mapper;
+  }
+
+  @Bean
+  public RedisTemplate<String, LeaderboardResponse> leaderboardRedisTemplate(
+      RedisConnectionFactory connectionFactory, ObjectMapper redisObjectMapper) {
+    RedisTemplate<String, LeaderboardResponse> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
 
-    // Key 使用 String 序列化
     StringRedisSerializer stringSerializer = new StringRedisSerializer();
     template.setKeySerializer(stringSerializer);
     template.setHashKeySerializer(stringSerializer);
 
-    // Value 使用 JSON 序列化
-    ObjectMapper objectMapper = new ObjectMapper();
-    objectMapper.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
-    objectMapper.activateDefaultTyping(
-        LaissezFaireSubTypeValidator.instance,
-        ObjectMapper.DefaultTyping.NON_FINAL,
-        JsonTypeInfo.As.PROPERTY);
-    objectMapper.registerModule(new JavaTimeModule());
-
-    GenericJackson2JsonRedisSerializer jsonSerializer =
-        new GenericJackson2JsonRedisSerializer(objectMapper);
-    template.setValueSerializer(jsonSerializer);
-    template.setHashValueSerializer(jsonSerializer);
+    Jackson2JsonRedisSerializer<LeaderboardResponse> valueSerializer =
+        new Jackson2JsonRedisSerializer<>(redisObjectMapper, LeaderboardResponse.class);
+    template.setValueSerializer(valueSerializer);
+    template.setHashValueSerializer(valueSerializer);
 
     template.afterPropertiesSet();
     return template;

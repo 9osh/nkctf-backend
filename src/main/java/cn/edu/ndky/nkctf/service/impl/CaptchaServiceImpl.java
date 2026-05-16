@@ -7,7 +7,7 @@ import cn.hutool.captcha.LineCaptcha;
 import cn.hutool.core.util.IdUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.TimeUnit;
@@ -23,7 +23,7 @@ public class CaptchaServiceImpl implements CaptchaService {
   private static final String CAPTCHA_KEY = "nkctf:captcha:";
   private static final int CAPTCHA_EXPIRE_MINUTES = 5;
 
-  private final RedisTemplate<String, Object> redisTemplate;
+  private final StringRedisTemplate stringRedisTemplate;
 
   @Override
   public CaptchaResponse generate() {
@@ -35,7 +35,7 @@ public class CaptchaServiceImpl implements CaptchaService {
 
     // 存储验证码到 Redis（5 分钟过期，忽略大小写存储小写）
     String code = captcha.getCode().toLowerCase();
-    redisTemplate.opsForValue().set(
+    stringRedisTemplate.opsForValue().set(
         CAPTCHA_KEY + captchaId,
         code,
         CAPTCHA_EXPIRE_MINUTES,
@@ -57,7 +57,7 @@ public class CaptchaServiceImpl implements CaptchaService {
     }
 
     String key = CAPTCHA_KEY + captchaId;
-    Object storedCode = redisTemplate.opsForValue().get(key);
+    String storedCode = stringRedisTemplate.opsForValue().get(key);
 
     if (storedCode == null) {
       log.warn("验证码不存在或已过期: {}", captchaId);
@@ -65,10 +65,10 @@ public class CaptchaServiceImpl implements CaptchaService {
     }
 
     // 验证后立即删除（一次性使用）
-    redisTemplate.delete(key);
+    stringRedisTemplate.delete(key);
 
     // 忽略大小写比较
-    boolean result = code.toLowerCase().equals(storedCode.toString());
+    boolean result = code.toLowerCase().equals(storedCode);
     if (!result) {
       log.warn("验证码错误: {} - 期望: {}, 实际: {}", captchaId, storedCode, code);
     }

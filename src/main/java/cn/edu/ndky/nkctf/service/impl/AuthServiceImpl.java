@@ -15,7 +15,7 @@ import cn.edu.ndky.nkctf.util.TokenHashUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,7 +44,7 @@ public class AuthServiceImpl implements AuthService {
   private final RefreshTokenMapper refreshTokenMapper;
   private final JwtUtil jwtUtil;
   private final PasswordEncoder passwordEncoder;
-  private final RedisTemplate<String, Object> redisTemplate;
+  private final StringRedisTemplate stringRedisTemplate;
 
   @Override
   @Transactional
@@ -147,9 +147,9 @@ public class AuthServiceImpl implements AuthService {
    */
   private void checkAccountLock(String username) {
     String lockKey = LOGIN_LOCK_KEY + username;
-    Boolean isLocked = redisTemplate.hasKey(lockKey);
+    Boolean isLocked = stringRedisTemplate.hasKey(lockKey);
     if (Boolean.TRUE.equals(isLocked)) {
-      Long ttl = redisTemplate.getExpire(lockKey, TimeUnit.MINUTES);
+      Long ttl = stringRedisTemplate.getExpire(lockKey, TimeUnit.MINUTES);
       log.warn("账户已被锁定: {} - 剩余 {} 分钟", username, ttl);
       throw new BusinessException(423, "账户已被锁定，请 " + ttl + " 分钟后再试");
     }
@@ -163,18 +163,18 @@ public class AuthServiceImpl implements AuthService {
     String lockKey = LOGIN_LOCK_KEY + username;
 
     // 增加失败计数
-    Long failCount = redisTemplate.opsForValue().increment(failCountKey);
+    Long failCount = stringRedisTemplate.opsForValue().increment(failCountKey);
     if (failCount == 1) {
       // 首次失败，设置过期时间（30分钟内的失败次数）
-      redisTemplate.expire(failCountKey, LOCK_MINUTES, TimeUnit.MINUTES);
+      stringRedisTemplate.expire(failCountKey, LOCK_MINUTES, TimeUnit.MINUTES);
     }
 
     log.warn("登录失败计数: {} - 第 {} 次", username, failCount);
 
     // 达到最大失败次数，锁定账户
     if (failCount >= MAX_FAIL_COUNT) {
-      redisTemplate.opsForValue().set(lockKey, "locked", LOCK_MINUTES, TimeUnit.MINUTES);
-      redisTemplate.delete(failCountKey);
+      stringRedisTemplate.opsForValue().set(lockKey, "locked", LOCK_MINUTES, TimeUnit.MINUTES);
+      stringRedisTemplate.delete(failCountKey);
       log.warn("账户已被锁定: {} - 锁定 {} 分钟", username, LOCK_MINUTES);
       throw new BusinessException(423, "登录失败次数过多，账户已被锁定 " + LOCK_MINUTES + " 分钟");
     }
@@ -185,7 +185,7 @@ public class AuthServiceImpl implements AuthService {
    */
   private void clearLoginFailCount(String username) {
     String failCountKey = LOGIN_FAIL_COUNT_KEY + username;
-    redisTemplate.delete(failCountKey);
+    stringRedisTemplate.delete(failCountKey);
   }
 
   @Override
@@ -317,7 +317,7 @@ public class AuthServiceImpl implements AuthService {
 
         if (ttl > 0) {
           String blacklistKey = TOKEN_BLACKLIST_KEY + accessToken;
-          redisTemplate.opsForValue().set(blacklistKey, "1", ttl, TimeUnit.MILLISECONDS);
+          stringRedisTemplate.opsForValue().set(blacklistKey, "1", ttl, TimeUnit.MILLISECONDS);
           log.info("Access Token 已加入黑名单");
         }
       } catch (Exception e) {
@@ -345,6 +345,6 @@ public class AuthServiceImpl implements AuthService {
   @Override
   public boolean isTokenBlacklisted(String token) {
     String blacklistKey = TOKEN_BLACKLIST_KEY + token;
-    return Boolean.TRUE.equals(redisTemplate.hasKey(blacklistKey));
+    return Boolean.TRUE.equals(stringRedisTemplate.hasKey(blacklistKey));
   }
 }

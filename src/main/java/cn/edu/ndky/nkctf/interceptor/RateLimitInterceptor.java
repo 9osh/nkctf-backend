@@ -6,7 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class RateLimitInterceptor implements HandlerInterceptor {
 
-  private final RedisTemplate<String, Object> redisTemplate;
+  private final StringRedisTemplate stringRedisTemplate;
 
   @Override
   public boolean preHandle(HttpServletRequest request, HttpServletResponse response,
@@ -39,9 +39,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     String uri = request.getRequestURI();
     String key = rateLimit.prefix() + uri + ":" + ip;
 
-    Long count = redisTemplate.opsForValue().increment(key);
+    Long count = stringRedisTemplate.opsForValue().increment(key);
     if (count == 1) {
-      redisTemplate.expire(key, rateLimit.window(), TimeUnit.SECONDS);
+      stringRedisTemplate.expire(key, rateLimit.window(), TimeUnit.SECONDS);
     }
 
     if (count > rateLimit.maxRequests()) {

@@ -44,7 +44,7 @@ public class LeaderboardServiceImpl implements LeaderboardService {
   private static final long CACHE_TTL_MINUTES = 5;
 
   private final UserMapper userMapper;
-  private final RedisTemplate<String, Object> redisTemplate;
+  private final RedisTemplate<String, LeaderboardResponse> leaderboardRedisTemplate;
 
   @Override
   public LeaderboardResponse getLeaderboard(int page) {
@@ -97,9 +97,9 @@ public class LeaderboardServiceImpl implements LeaderboardService {
   @Override
   public void invalidateCache() {
     try {
-      var keys = redisTemplate.keys(CACHE_KEY_PREFIX + "*");
+      var keys = leaderboardRedisTemplate.keys(CACHE_KEY_PREFIX + "*");
       if (keys != null && !keys.isEmpty()) {
-        redisTemplate.delete(keys);
+        leaderboardRedisTemplate.delete(keys);
         log.info("排行榜缓存已清除，共 {} 个 key", keys.size());
       }
     } catch (Exception e) {
@@ -125,10 +125,7 @@ public class LeaderboardServiceImpl implements LeaderboardService {
    */
   private LeaderboardResponse getFromCache(String key) {
     try {
-      Object cached = redisTemplate.opsForValue().get(key);
-      if (cached instanceof LeaderboardResponse response) {
-        return response;
-      }
+      return leaderboardRedisTemplate.opsForValue().get(key);
     } catch (Exception e) {
       log.warn("读取排行榜缓存失败: {}", e.getMessage());
     }
@@ -140,7 +137,7 @@ public class LeaderboardServiceImpl implements LeaderboardService {
    */
   private void saveToCache(String key, LeaderboardResponse response) {
     try {
-      redisTemplate.opsForValue().set(key, response, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+      leaderboardRedisTemplate.opsForValue().set(key, response, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
     } catch (Exception e) {
       log.warn("写入排行榜缓存失败: {}", e.getMessage());
     }

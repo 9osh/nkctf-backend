@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import cn.edu.ndky.nkctf.dto.response.LeaderboardResponse;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
@@ -33,7 +34,7 @@ public class TestInfrastructureConfig {
   @Bean
   @Primary
   @SuppressWarnings("unchecked")
-  public RedisTemplate<String, Object> redisTemplate() {
+  public RedisTemplate<String, LeaderboardResponse> leaderboardRedisTemplate() {
     return mock(RedisTemplate.class);
   }
 
