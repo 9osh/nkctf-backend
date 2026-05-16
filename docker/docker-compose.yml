@@ -1,4 +1,7 @@
 # 本地开发基础设施：端口仅绑定 127.0.0.1，避免暴露到局域网
+#
+# 注意：init-db 仅在 postgres_data 卷「首次创建」时执行；改代码后 rebuild 不会重跑 SQL。
+# 已有库请执行：./docker/migrate.sh  或重启后端（spring.sql.init 会应用 db/migration/*.sql）
 services:
   postgres:
     image: postgres:16-alpine

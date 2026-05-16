@@ -1,5 +1,9 @@
 # Integration test profile — no Docker / PostgreSQL / Redis required
 spring:
+  sql:
+    init:
+      mode: never
+
   datasource:
     url: jdbc:h2:mem:nkctf;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver

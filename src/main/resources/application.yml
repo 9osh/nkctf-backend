@@ -7,6 +7,12 @@ spring:
   application:
     name: nkctf-platform
 
+  # 增量 DDL：每次启动对已有库执行 db/migration/*.sql（build / 重建镜像不会改库，靠此项或 docker/migrate.sh）
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/migration/*.sql
+
   # 数据库配置（本地默认仅用于开发；生产见 application-prod.yml + NKCTF_DB_*）
   datasource:
     url: ${NKCTF_DB_URL:jdbc:postgresql://localhost:5432/nkctf}
